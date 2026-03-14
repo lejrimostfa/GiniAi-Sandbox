@@ -1470,10 +1470,10 @@ export class SimulationEngine {
       // Satisfaction: state-dependent boosts/penalties, all decay gently
       // All rates scaled by ticksPerYear so annual effect stays constant
       const tpy = this.params.ticksPerYear
-      const satBoost = 0.06 / tpy     // employed: +0.06/year
+      const satBoost = 0.18 / tpy     // employed: +0.18/year (net +0.06 after decay)
       const satDecay = 0.12 / tpy      // base decay: -0.12/year
-      const unempDrain = 0.25 / tpy    // unemployed: -0.25/year additional
-      const sickDrain = 0.15 / tpy     // sick: -0.15/year additional
+      const unempDrain = 0.20 / tpy    // unemployed: -0.20/year additional (total -0.32/yr)
+      const sickDrain = 0.12 / tpy     // sick: -0.12/year additional
 
       if (agent.state === 'employed' || agent.state === 'business_owner') {
         agent.satisfaction = clamp(agent.satisfaction + satBoost, 0, 1)

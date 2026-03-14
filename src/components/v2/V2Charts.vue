@@ -290,17 +290,36 @@ function toggleAllSocietal() {
   }
 }
 
+// Rolling average helper to smooth noisy per-tick data (e.g. tax revenue, redistribution)
+const SMOOTH_WINDOW = 4 // 4-tick moving average
+const smoothKeys = new Set(['taxRevenue', 'redistribution'])
+
+function smoothData(raw: number[]): number[] {
+  if (raw.length <= SMOOTH_WINDOW) return raw
+  const out: number[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const start = Math.max(0, i - SMOOTH_WINDOW + 1)
+    let sum = 0
+    for (let j = start; j <= i; j++) sum += raw[j]
+    out.push(sum / (i - start + 1))
+  }
+  return out
+}
+
 const societalData = computed<ChartData<'line'>>(() => ({
   labels: labels.value,
   datasets: societalSeriesConfig
     .filter(s => societalVisible.value.has(s.key))
-    .map(s => ({
-      label: s.label,
-      data: sim.metricsHistory.map(s.accessor),
-      borderColor: s.color,
-      backgroundColor: 'transparent',
-      ...(s.dash ? { borderDash: s.dash } : {}),
-    })),
+    .map(s => {
+      const raw = sim.metricsHistory.map(s.accessor)
+      return {
+        label: s.label,
+        data: smoothKeys.has(s.key) ? smoothData(raw) : raw,
+        borderColor: s.color,
+        backgroundColor: 'transparent',
+        ...(s.dash ? { borderDash: s.dash } : {}),
+      }
+    }),
 }))
 const societalOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Societal Phenomena')
