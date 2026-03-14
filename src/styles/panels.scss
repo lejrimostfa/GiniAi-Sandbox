@@ -1,0 +1,199 @@
+// --- Panel Shared Styles ---
+@use 'variables' as *;
+
+.panel {
+  background: $bg-panel;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  padding: $space-md;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  &__title {
+    font-size: $font-size-sm;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: $text-secondary;
+    margin-bottom: $space-md;
+  }
+}
+
+// Buttons
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: $space-xs $space-sm;
+  border: 1px solid $border-color;
+  border-radius: $radius-sm;
+  background: $bg-button;
+  color: $text-primary;
+  font-size: $font-size-sm;
+  font-family: $font-sans;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 28px;
+  height: 28px;
+
+  &:hover {
+    background: $bg-button-hover;
+    border-color: $border-active;
+  }
+
+  &:active {
+    background: $bg-button-active;
+  }
+
+  &--active {
+    background: $bg-button-active;
+    border-color: $color-accent;
+    color: $color-accent;
+  }
+
+  &--icon {
+    padding: $space-xs;
+    font-size: $font-size-lg;
+  }
+}
+
+// Sliders
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: $space-xs;
+
+  &__label {
+    display: flex;
+    justify-content: space-between;
+    font-size: $font-size-sm;
+    color: $text-secondary;
+  }
+
+  &__value {
+    color: $text-accent;
+    font-family: $font-mono;
+    font-size: $font-size-xs;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(100, 100, 140, 0.3);
+    outline: none;
+
+    &::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: $color-accent;
+      cursor: pointer;
+    }
+  }
+}
+
+// Metric card
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  padding: $space-sm;
+  background: rgba(20, 20, 40, 0.5);
+  border-radius: $radius-sm;
+  border: 1px solid rgba(100, 100, 140, 0.15);
+
+  &__label {
+    font-size: $font-size-xs;
+    color: $text-secondary;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: $space-xs;
+  }
+
+  &__value {
+    font-size: $font-size-lg;
+    font-family: $font-mono;
+    font-weight: 600;
+    color: $text-primary;
+    margin-top: 2px;
+  }
+
+  &__help {
+    font-size: $font-size-xs;
+    color: $text-muted;
+    cursor: help;
+    border-bottom: 1px dotted $text-muted;
+  }
+}
+
+// Chips / tabs
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px $space-sm;
+  border-radius: $radius-lg;
+  font-size: $font-size-xs;
+  font-weight: 500;
+  border: 1px solid $border-color;
+  background: transparent;
+  color: $text-secondary;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: $bg-button-hover;
+    color: $text-primary;
+  }
+
+  &--active {
+    background: $bg-button-active;
+    border-color: $color-accent;
+    color: $color-accent;
+  }
+}
+
+// Toggle switch
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $space-xs 0;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+  cursor: pointer;
+
+  &__switch {
+    width: 32px;
+    height: 16px;
+    border-radius: 8px;
+    background: rgba(100, 100, 140, 0.3);
+    position: relative;
+    transition: background 0.2s ease;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: $text-secondary;
+      transition: all 0.2s ease;
+    }
+  }
+
+  &--active .toggle__switch {
+    background: rgba(129, 178, 154, 0.5);
+
+    &::after {
+      left: 18px;
+      background: $color-redistribution;
+    }
+  }
+}
