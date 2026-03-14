@@ -49,7 +49,11 @@ GiniAI-Sandbox repose sur un **modèle à agents (ABM — Agent-Based Model)** o
 | `state` | État courant : `employed`, `unemployed`, `business_owner`, `retired`, `criminal`, `dead` |
 | `wealth` | Épargne accumulée ($) |
 | `income` | Revenu par tick |
-| `satisfaction` | Indice de bien-être (0–1) |
+| `satisfaction` | Indice de bien-être (0–1), influencé par l'état (emploi, chômage, crime, maladie) |
+| `children` | Nombre d'enfants |
+| `partnerId` | Conjoint(e) éventuel(le) |
+| `homeOwned` | Propriétaire ou locataire |
+| `isSick` | Malade ou non |
 
 Les agents interagissent avec un **monde structuré** composé de localisations typées :
 - **Workplaces** (usines, bureaux, studios, commerces) — offrent des emplois avec des salaires et des risques d'automatisation distincts
@@ -125,7 +129,46 @@ Satisfaction < 0.20 pendant >5 ticks consécutifs + âge > 22
 #### 💍 Mariage
 ```
 Satisfaction > 0.60 + emploi stable + satisfaction soutenue
+→ Filtres démographiques : éducation femme ↑ → probabilité ↓ ; richesse homme ↓ → probabilité ↓
 → Mariage : boost de satisfaction
+```
+
+#### 👶 Transition démographique / Demographic Transition
+```
+Âge moyen du couple > 35 → pénalité croissante (+4%/an au-delà de 35)
+Éducation élevée → +31% d'échec de conception
+Richesse élevée → jusqu'à +30% d'échec
+Satisfaction élevée → jusqu'à +10% d'échec (focus carrière)
+Enfants existants → +12% par enfant
+→ Les sociétés riches et éduquées font moins d'enfants (transition démographique)
+```
+
+#### 👧 Mortalité infantile / Child Mortality
+```
+Richesse parentale < $100 + enfant < 5 ans → risque élevé (~3%/an)
+Richesse parentale < $100 + enfant 5-17 ans → risque modéré (~0.8%/an)
+Orphelin (aucun parent vivant) → +5% de risque additionnel
+```
+
+#### 🌍 Immigration
+```
+Paramètre : immigrationRate (0–100%)
+0% → aucune immigration, la population décline naturellement
+100% → remplacement complet (jusqu'à 2 immigrants/tick)
+Taux intermédiaires → immigration sporadique (filtre probabiliste)
+```
+
+#### 😊 Dynamique de satisfaction / Satisfaction Dynamics
+```
+Employé / Patron : +0.06/an
+Chômeur : -0.25/an (drain actif)
+Criminel : -0.375/an (drain intense)
+Malade : -0.15/an (drain additionnel)
+Propriétaire (sans dette) : +0.08/an (stabilité)
+Consommation marché : +0.06 par visite
+Déclin de base : -0.12/an (entropie naturelle)
+→ Un chômeur passe de 0.7 à ~0.33 de satisfaction en 1 an
+→ Un employé propriétaire se stabilise autour de 0.7-0.8
 ```
 
 ### 4. Boucle de simulation / Simulation Loop
@@ -154,6 +197,9 @@ Chaque tick exécute, dans l'ordre :
 | Taux de displacement total | Somme des deux canaux |
 | Satisfaction moyenne | Bien-être moyen de la population |
 | Taux de criminalité | Nombre de crimes par tick |
+| Taux de fertilité | Naissances / population |
+| Mortalité infantile | Décès d'enfants liés à la pauvreté familiale |
+| Taux d'immigration | % de remplacement de population (paramétrable 0–100%) |
 | Part du top 10% | % de la richesse totale détenue par les 10% les plus riches |
 | Part du bottom 50% | % de la richesse totale détenue par les 50% les plus pauvres |
 

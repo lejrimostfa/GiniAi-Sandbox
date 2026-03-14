@@ -3,7 +3,7 @@
 // Play/pause/step, speed control, tick display
 // Connected to v2SimulationStore
 
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSimStore } from '../../stores/v2SimulationStore'
 import eventBus from '../../events/eventBus'
 
@@ -33,6 +33,35 @@ function cycleSpeed() {
   const next = speeds[(idx + 1) % speeds.length]
   sim.setSpeed(next)
 }
+
+function speedUp() {
+  const idx = speeds.indexOf(sim.speed)
+  if (idx < speeds.length - 1) sim.setSpeed(speeds[idx + 1])
+}
+
+function speedDown() {
+  const idx = speeds.indexOf(sim.speed)
+  if (idx > 0) sim.setSpeed(speeds[idx - 1])
+}
+
+// --- Keyboard shortcuts ---
+function onKeydown(e: KeyboardEvent) {
+  // Ignore if user is typing in an input/textarea
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+  if (e.code === 'Space') {
+    e.preventDefault()
+    togglePlay()
+  } else if (e.key === '+' || e.key === '=') {
+    speedUp()
+  } else if (e.key === '-') {
+    speedDown()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 const showExportMenu = ref(false)
 
@@ -64,8 +93,14 @@ const emit = defineEmits<{
       </button>
 
       <!-- Speed -->
+      <button class="pb-btn pb-btn--speed-ctrl" @click="speedDown" title="Slow down (-)">
+        −
+      </button>
       <button class="pb-btn pb-btn--speed" @click="cycleSpeed" title="Change speed">
         {{ speedLabel }}
+      </button>
+      <button class="pb-btn pb-btn--speed-ctrl" @click="speedUp" title="Speed up (+)">
+        +
       </button>
 
       <!-- Reset camera -->
@@ -190,6 +225,14 @@ const emit = defineEmits<{
     font-family: monospace;
     font-weight: 600;
     color: $color-accent;
+  }
+
+  &--speed-ctrl {
+    width: 24px;
+    font-size: 16px;
+    font-weight: 700;
+    color: $text-muted;
+    &:hover { color: $color-accent; }
   }
 }
 

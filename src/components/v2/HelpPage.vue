@@ -49,6 +49,31 @@ const emit = defineEmits<{ close: [] }>()
         </ul>
       </section>
 
+      <!-- Demographics -->
+      <section class="help-section">
+        <h3>👶 Demographics & Family</h3>
+        <ul class="cause-list">
+          <li>👶 <b>Fertility</b> — Conception probability decreases with age (>35), education, wealth, satisfaction, and existing children (demographic transition model)</li>
+          <li>👧 <b>Child mortality</b> — Poor families (wealth <$100) risk losing children, especially under age 5</li>
+          <li>💍 <b>Marriage filters</b> — Educated women are less likely to couple (independence); poor men struggle to find partners</li>
+          <li>🌍 <b>Immigration</b> — Controlled by slider (0-100%). At 0%, population shrinks naturally. At 100%, full replacement up to target population</li>
+        </ul>
+      </section>
+
+      <!-- Satisfaction -->
+      <section class="help-section">
+        <h3>😊 Satisfaction System</h3>
+        <ul class="cause-list">
+          <li>💼 <b>Employed</b> → Small satisfaction boost (+0.06/yr)</li>
+          <li>🔍 <b>Unemployed</b> → Satisfaction drain (-0.25/yr)</li>
+          <li>🥷 <b>Criminal</b> → Heavy drain (-0.375/yr)</li>
+          <li>🤒 <b>Sick</b> → Additional drain (-0.15/yr)</li>
+          <li>🏠 <b>Homeowner</b> → Stability boost (+0.08/yr)</li>
+          <li>🛒 <b>Shopping</b> → +0.06 per market visit</li>
+          <li>📉 <b>Base decay</b> → Everyone loses -0.12/yr naturally</li>
+        </ul>
+      </section>
+
       <!-- Government -->
       <section class="help-section">
         <h3>🏛️ Government & Redistribution</h3>
@@ -129,6 +154,33 @@ const emit = defineEmits<{ close: [] }>()
           <div class="annual-item"><span class="annual-q">Q3</span> 🛒 Market Festival — Everyone goes shopping</div>
           <div class="annual-item"><span class="annual-q">Q4</span> 🏥 Health & Education — Healthcare + studies</div>
         </div>
+      </section>
+
+      <!-- Keyboard Shortcuts -->
+      <section class="help-section">
+        <h3>⌨️ Keyboard Shortcuts</h3>
+        <ul class="cause-list">
+          <li><b>Space</b> — Play / Pause simulation</li>
+          <li><b>+</b> — Speed up</li>
+          <li><b>-</b> — Slow down</li>
+        </ul>
+      </section>
+
+      <!-- Charts -->
+      <section class="help-section">
+        <h3>📊 Charts (10 tabs)</h3>
+        <ul class="cause-list">
+          <li>📈 <b>Gini</b> — Inequality coefficient over time</li>
+          <li>💼 <b>Employment</b> — Employment breakdown by state</li>
+          <li>💰 <b>Wealth</b> — Wealth trends (mean, median, top 10%, bottom 50%)</li>
+          <li>📊 <b>Distribution</b> — Wealth per individual (sorted bar chart)</li>
+          <li>🎂 <b>Age</b> — Population pyramid by 5-year age brackets</li>
+          <li>🤖 <b>Automation</b> — Robotic vs AI displacement, jobs filled</li>
+          <li>😊 <b>Satisfaction</b> — Mean satisfaction over time</li>
+          <li>⚡ <b>Societal</b> — 15 toggleable phenomena (births, deaths, crimes, divorces...)</li>
+          <li>🏠 <b>Housing</b> — Ownership, mortgages, evictions</li>
+          <li>🔀 <b>Cross-Var</b> — Scatter plot: pick any X, Y, color metric</li>
+        </ul>
       </section>
 
       <!-- Key Insight -->

@@ -1467,13 +1467,25 @@ export class SimulationEngine {
 
       // NO passive costs — all expenses are contact-based (market purchases)
 
-      // Satisfaction: employed agents get a small boost, all decay gently
-      // Rates scaled by ticksPerYear so annual effect stays constant
+      // Satisfaction: state-dependent boosts/penalties, all decay gently
+      // All rates scaled by ticksPerYear so annual effect stays constant
       const tpy = this.params.ticksPerYear
-      const satBoost = 0.06 / tpy   // employed: +0.06/year
-      const satDecay = 0.096 / tpy   // all: -0.096/year
+      const satBoost = 0.06 / tpy     // employed: +0.06/year
+      const satDecay = 0.12 / tpy      // base decay: -0.12/year
+      const unempDrain = 0.25 / tpy    // unemployed: -0.25/year additional
+      const sickDrain = 0.15 / tpy     // sick: -0.15/year additional
+
       if (agent.state === 'employed' || agent.state === 'business_owner') {
         agent.satisfaction = clamp(agent.satisfaction + satBoost, 0, 1)
+      } else if (agent.state === 'unemployed') {
+        // Unemployment is deeply dissatisfying
+        agent.satisfaction = clamp(agent.satisfaction - unempDrain, 0, 1)
+      } else if (agent.state === 'criminal') {
+        // Criminals have low life satisfaction
+        agent.satisfaction = clamp(agent.satisfaction - unempDrain * 1.5, 0, 1)
+      }
+      if (agent.isSick) {
+        agent.satisfaction = clamp(agent.satisfaction - sickDrain, 0, 1)
       }
       agent.satisfaction = clamp(agent.satisfaction - satDecay, 0, 1)
       agent.ticksSinceConsumption++
@@ -1691,8 +1703,8 @@ export class SimulationEngine {
 
       // --- 2a. Homeowner: no rent, no mortgage if paid off ---
       if (agent.homeOwned && agent.homeDebt <= 0) {
-        // Owned home → satisfaction boost (stability)
-        agent.satisfaction = clamp(agent.satisfaction + 0.03, 0, 1)
+        // Owned home → satisfaction boost (stability) — scaled per year
+        agent.satisfaction = clamp(agent.satisfaction + 0.08 / tpy, 0, 1)
         continue
       }
 

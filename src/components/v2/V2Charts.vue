@@ -19,6 +19,7 @@ const tabs = [
   { id: 'employment', label: 'Employment' },
   { id: 'wealth', label: 'Wealth' },
   { id: 'wealthDist', label: 'Distribution' },
+  { id: 'ageDist', label: 'Age' },
   { id: 'automation', label: 'Automation' },
   { id: 'satisfaction', label: 'Satisfaction' },
   { id: 'societal', label: 'Societal' },
@@ -121,6 +122,64 @@ const wealthDistOpts = computed<ChartOptions<'bar'>>(() => ({
       title: { display: true, text: 'Wealth ($)', color: CHART_COLORS.textMuted, font: { size: 10 } },
       ticks: { color: CHART_COLORS.textMuted, font: { size: 9, family: 'monospace' } },
       grid: { color: CHART_COLORS.grid },
+    },
+  },
+}))
+
+// --- Age Distribution Bar chart (population pyramid by age bracket) ---
+const ageDistData = computed<ChartData<'bar'>>(() => {
+  const agents = sim.agents.filter(a => a.state !== 'dead')
+  // Buckets: 0-4, 5-9, ..., 75-79, 80+
+  const bucketSize = 5
+  const bucketCount = 17 // 0-4 through 80+
+  const buckets = new Array(bucketCount).fill(0)
+  const bucketLabels: string[] = []
+  for (let i = 0; i < bucketCount; i++) {
+    const lo = i * bucketSize
+    bucketLabels.push(i === bucketCount - 1 ? `${lo}+` : `${lo}-${lo + bucketSize - 1}`)
+  }
+  for (const a of agents) {
+    const idx = Math.min(Math.floor(a.age / bucketSize), bucketCount - 1)
+    buckets[idx]++
+  }
+  return {
+    labels: bucketLabels,
+    datasets: [{
+      label: 'Agents',
+      data: buckets,
+      backgroundColor: buckets.map((_, i) => {
+        const lo = i * bucketSize
+        if (lo < 18) return 'rgba(100, 180, 255, 0.7)'  // children — blue
+        if (lo < 65) return 'rgba(129, 178, 154, 0.7)'   // working age — green
+        return 'rgba(212, 165, 116, 0.7)'                  // retired — gold
+      }),
+      borderWidth: 0,
+    }],
+  }
+})
+const ageDistOpts = computed<ChartOptions<'bar'>>(() => ({
+  responsive: true, maintainAspectRatio: false,
+  indexAxis: 'y' as const,
+  animation: { duration: 0 },
+  plugins: {
+    zoom: ZOOM_OPTIONS,
+    title: { display: true, text: 'Age Distribution', color: CHART_COLORS.text, font: { size: 12, weight: 'bold' as const } },
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: 'rgba(26, 26, 46, 0.95)', titleColor: '#E8E8E8', bodyColor: '#A0A0B0',
+      callbacks: { label: (item) => `${item.raw} agents` },
+    },
+  },
+  scales: {
+    x: {
+      title: { display: true, text: 'Number of Agents', color: CHART_COLORS.textMuted, font: { size: 10 } },
+      ticks: { color: CHART_COLORS.textMuted, font: { size: 9, family: 'monospace' } },
+      grid: { color: CHART_COLORS.grid },
+    },
+    y: {
+      title: { display: true, text: 'Age Bracket', color: CHART_COLORS.textMuted, font: { size: 10 } },
+      ticks: { color: CHART_COLORS.textMuted, font: { size: 9, family: 'monospace' } },
+      grid: { display: false },
     },
   },
 }))
@@ -367,6 +426,7 @@ const giniChart = ref<InstanceType<typeof Line> | null>(null)
 const empChart = ref<InstanceType<typeof Line> | null>(null)
 const wealthChart = ref<InstanceType<typeof Line> | null>(null)
 const wealthDistChart = ref<InstanceType<typeof Bar> | null>(null)
+const ageDistChart = ref<InstanceType<typeof Bar> | null>(null)
 const autoChart = ref<InstanceType<typeof Line> | null>(null)
 const satChart = ref<InstanceType<typeof Line> | null>(null)
 const societalChart = ref<InstanceType<typeof Line> | null>(null)
@@ -376,7 +436,7 @@ const scatterChart = ref<InstanceType<typeof Scatter> | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chartRefs: Record<string, ReturnType<typeof ref<any>>> = {
   gini: giniChart, employment: empChart, wealth: wealthChart,
-  wealthDist: wealthDistChart, automation: autoChart,
+  wealthDist: wealthDistChart, ageDist: ageDistChart, automation: autoChart,
   satisfaction: satChart, societal: societalChart, housing: housingChart, scatter: scatterChart,
 }
 
@@ -409,6 +469,7 @@ function resetZoom() {
       <div v-show="activeTab === 'employment'" class="chart-wrap"><Line ref="empChart" :data="empData" :options="empOpts" /></div>
       <div v-show="activeTab === 'wealth'" class="chart-wrap"><Line ref="wealthChart" :data="wealthData" :options="wealthOpts" /></div>
       <div v-show="activeTab === 'wealthDist'" class="chart-wrap"><Bar ref="wealthDistChart" :data="wealthDistData" :options="wealthDistOpts" /></div>
+      <div v-show="activeTab === 'ageDist'" class="chart-wrap"><Bar ref="ageDistChart" :data="ageDistData" :options="ageDistOpts" /></div>
       <div v-show="activeTab === 'automation'" class="chart-wrap"><Line ref="autoChart" :data="autoData" :options="autoOpts" /></div>
       <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
       <div v-show="activeTab === 'societal'" class="chart-wrap chart-wrap--societal">

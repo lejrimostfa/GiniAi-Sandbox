@@ -35,11 +35,16 @@ The simulation visualizes how **inequality** (measured by the Gini coefficient) 
 - **Full economic cycle**: wages, taxes, redistribution, pensions, unemployment benefits, UBI, banking/loans, business creation & bankruptcy
 - **Housing market**: rent, mortgages, home ownership, government housing expansion
 - **Family dynamics**: marriage, children, divorce, inheritance
+- **Demographic transition**: conception failure increases with age, education, wealth, satisfaction, and existing children
+- **Marriage filters**: educated women less likely to couple; poor men less likely to find partners
+- **Child mortality**: poverty-driven, especially for children under 5
+- **Configurable immigration**: slider from 0% (population shrinks naturally) to 100% (full replacement)
+- **Satisfaction model**: state-dependent — unemployment, crime, and sickness actively drain satisfaction; homeownership and employment boost it
 
 ### Visualization
 - **Real-time 3D rendering** with Three.js (instanced meshes for performance)
 - **15 heatmap modes**: wealth, poverty, illness, unemployment, satisfaction, age, education, crime, mortality, births, family size, housing, businesses, automation
-- **8 chart types**: Gini over time, employment breakdown, wealth distribution, automation displacement, satisfaction, societal phenomena, cross-variable scatter plots
+- **10 chart types**: Gini over time, employment breakdown, wealth distribution, age distribution pyramid, automation displacement, satisfaction, societal phenomena (15 toggleable series), housing, cross-variable scatter plots
 - **Agent inspector**: click any agent to see their full stats, wealth history sparkline, and life event log
 - **Location info bubbles**: click any building for description, stats, and economic impact
 
@@ -51,8 +56,9 @@ The simulation visualizes how **inequality** (measured by the Gini coefficient) 
 
 ### Controls
 - **Initial parameters** (locked after start): population size, starting Gini, average lifespan, education mix, economy type (agrarian/industrial/service/tech)
-- **Live controls** (adjustable during simulation): robotic automation rate, AI diffusion rate, redistribution level, UBI toggle
-- **Playback**: play/pause, speed control (1x–30x), week/year counter
+- **Live controls** (adjustable during simulation): robotic automation rate, AI diffusion rate, redistribution level, immigration rate, UBI toggle, diseases toggle
+- **Playback**: play/pause, step, speed control (0.05x–30x) with +/- buttons, week/year counter
+- **Keyboard shortcuts**: `Space` play/pause, `+`/`-` speed up/down
 
 ![Heatmap crime overlay on the 3D world](public/4.png)
 *Crime heatmap overlay — red zones indicate high criminal activity, often correlating with poverty clusters.*
@@ -117,7 +123,7 @@ src/
 │   ├── HelpPage.vue          # Interactive help/tutorial
 │   ├── SimLegend.vue         # Location/agent/event legend
 │   ├── InfoBubble.vue        # Location click info popup
-│   ├── V2Charts.vue          # 8 chart tabs with zoom
+│   ├── V2Charts.vue          # 10 chart tabs with zoom
 │   └── PlaybackBar.vue       # Play/pause, speed, timeline
 ├── stores/
 │   └── v2SimulationStore.ts  # Pinia store bridging engine ↔ UI
@@ -159,6 +165,21 @@ Work → Wage → Tax → Government → Redistribution
 | Satisfaction <0.20 for >5 weeks | Relationship breakdown | Divorce + wealth loss |
 | Stable job + high satisfaction | Physical encounter | Marriage |
 | Wealth + education + productivity | Bank loan | Business creation |
+| High education + wealth + satisfaction | Conception failure rate ↑ | Demographic transition |
+| Family poverty (<$100) | Child mortality risk | Premature child death |
+| Female education ↑ | Marriage probability ↓ | Female independence |
+| Male wealth ↓ | Marriage probability ↓ | Involuntary celibacy |
+
+### Satisfaction Dynamics
+| State | Annual Effect |
+|-------|---------------|
+| Employed / Business owner | +0.06/yr boost |
+| Unemployed | −0.25/yr drain |
+| Criminal | −0.375/yr drain |
+| Sick | −0.15/yr additional drain |
+| Homeowner (paid off) | +0.08/yr stability |
+| Base decay (everyone) | −0.12/yr |
+| Market shopping | +0.06 per visit |
 
 ### Annual Calendar (52 weeks/year)
 | Quarter | Event |
