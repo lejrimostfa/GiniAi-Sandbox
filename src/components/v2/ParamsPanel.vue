@@ -26,6 +26,7 @@ const aiRate = ref(sim.params.aiGrowthRate * 100)
 const aiDiffusion = ref(sim.params.aiDiffusionRate * 100)
 const redistribution = ref(sim.params.redistributionLevel * 100)
 const enableUBI = ref(sim.params.enableUBI)
+const immigrationRate = ref(sim.params.immigrationRate * 100)
 const diseasesEnabled = ref(sim.params.diseasesEnabled)
 const economyType = ref<EconomyType>(sim.params.economyType)
 
@@ -78,6 +79,7 @@ watch(aiRate, (v) => sim.updateParams({ aiGrowthRate: v / 100 }))
 watch(aiDiffusion, (v) => sim.updateParams({ aiDiffusionRate: v / 100 }))
 watch(redistribution, (v) => sim.updateParams({ redistributionLevel: v / 100 }))
 watch(enableUBI, (v) => sim.updateParams({ enableUBI: v }))
+watch(immigrationRate, (v) => sim.updateParams({ immigrationRate: v / 100 }))
 watch(diseasesEnabled, (v) => sim.updateParams({ diseasesEnabled: v }))
 
 // --- Reset simulation with current params ---
@@ -98,6 +100,7 @@ function resetSim() {
     aiDiffusionRate: aiDiffusion.value / 100,
     redistributionLevel: redistribution.value / 100,
     enableUBI: enableUBI.value,
+    immigrationRate: immigrationRate.value / 100,
     diseasesEnabled: diseasesEnabled.value,
     economyType: economyType.value,
   })
@@ -205,6 +208,15 @@ function resetSim() {
       </label>
       <input type="range" v-model.number="redistribution" :min="0" :max="100" :step="5" />
       <div class="param-hint">Tax &amp; transfer intensity</div>
+    </div>
+
+    <div class="param-group">
+      <label>
+        Immigration Rate
+        <span class="param-value">{{ immigrationRate.toFixed(0) }}%</span>
+      </label>
+      <input type="range" v-model.number="immigrationRate" :min="0" :max="100" :step="5" />
+      <div class="param-hint">0% = no immigration (population shrinks naturally), 100% = full replacement</div>
     </div>
 
     <div class="param-group">

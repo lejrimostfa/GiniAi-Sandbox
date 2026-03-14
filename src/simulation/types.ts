@@ -284,6 +284,8 @@ export interface SimulationParams {
   economyType: EconomyType
   // Simulation
   ticksPerYear: number          // how many ticks = 1 sim year (default 52, 1 tick = 1 week)
+  // Immigration
+  immigrationRate: number        // 0–1 (0 = no immigration, 1 = full replacement up to target pop)
   // Toggles
   diseasesEnabled: boolean       // whether disease onset & contagion are active
 }
@@ -300,6 +302,7 @@ export const DEFAULT_PARAMS: SimulationParams = {
   economyType: 'industrial',
   ticksPerYear: 52,
   enableUBI: false,
+  immigrationRate: 1.0,           // full immigration by default (legacy behavior)
   diseasesEnabled: false,
 }
 

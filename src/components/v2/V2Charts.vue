@@ -203,7 +203,6 @@ const societalSeriesConfig: SocietalSeries[] = [
   { key: 'layoffs', label: 'Layoffs', color: '#E63946', dash: [6, 2], accessor: m => m.layoffs },
   { key: 'unemployed', label: 'Unemployed', color: '#FF8C42', accessor: m => m.unemployedCount },
   { key: 'fertilityRate', label: 'Fertility Rate', color: '#4A90D9', dash: [4, 3], accessor: m => m.fertilityRate },
-  { key: 'crimeRate', label: 'Crime Rate', color: '#7B68EE', dash: [4, 3], accessor: m => m.crimeRate },
   { key: 'taxRevenue', label: 'Tax Revenue', color: '#6BBF59', dash: [2, 2], accessor: m => m.taxRevenue },
   { key: 'redistribution', label: 'Redistribution', color: '#45B7D1', dash: [2, 2], accessor: m => m.redistributionPaid },
   { key: 'satisfaction', label: 'Satisfaction ×100', color: '#FFD700', accessor: m => Math.round(m.meanSatisfaction * 100) },

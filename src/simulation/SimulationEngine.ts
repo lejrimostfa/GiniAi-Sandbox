@@ -590,12 +590,18 @@ export class SimulationEngine {
       this.tickDeaths += toRemove.length
     }
 
-    // --- Immigration: add 0-2 agents per tick if below target population ---
+    // --- Immigration: add agents if below target population (controlled by immigrationRate param) ---
+    // immigrationRate=0 → no immigration, population shrinks naturally
+    // immigrationRate=1 → up to 2 immigrants/tick (full replacement)
+    if (this.params.immigrationRate <= 0) return
     const deficit = this.params.populationSize - this.agents.length
-    const maxPerTick = 2 // cap to avoid batch spikes
+    if (deficit <= 0) return
+    const maxPerTick = Math.max(1, Math.round(2 * this.params.immigrationRate))
     const toAdd = Math.min(deficit, maxPerTick)
 
     for (let i = 0; i < toAdd; i++) {
+      // At low immigration rates, each immigrant has a chance of being skipped
+      if (this.rng() > this.params.immigrationRate) continue
       const home = homes[Math.floor(this.rng() * homes.length)]
       const gender = this.rng() < 0.5 ? 'male' as const : 'female' as const
 
