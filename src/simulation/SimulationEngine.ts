@@ -1851,7 +1851,32 @@ export class SimulationEngine {
       const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
       const notTooManyKids = agent.children < 4
 
-      if (bothSatisfied && atLeastOneEmployed && fertileAge && notTooManyKids && this.rng() < birthProbPerTick) {
+      // --- Conception failure: probability increases with age, satisfaction, education, wealth ---
+      // Real-world demographic transition: richer, more educated, happier people have fewer children
+      // Age factor: fertility peaks at 25, drops sharply after 35
+      const avgAge = (agent.age + partner.age) / 2
+      const agePenalty = avgAge > 35 ? (avgAge - 35) * 0.04 : 0 // +4% failure per year over 35
+
+      // Education factor: high-edu couples have fewer children (demographic transition)
+      const eduScore = (e: string) => e === 'high' ? 0.9 : e === 'medium' ? 0.5 : 0.2
+      const coupleEdu = (eduScore(agent.education) + eduScore(partner.education)) / 2
+      const eduPenalty = coupleEdu * 0.35 // high-edu couple: +31% failure
+
+      // Wealth factor: wealthier couples delay/avoid children
+      const coupleWealth = agent.wealth + partner.wealth
+      const wealthPenalty = Math.min(0.3, Math.max(0, coupleWealth - 200) * 0.001) // caps at +30%
+
+      // Satisfaction factor: very happy people are more career-focused, less urgency for kids
+      const avgSat = (agent.satisfaction + partner.satisfaction) / 2
+      const satPenalty = Math.max(0, (avgSat - 0.6) * 0.25) // above 0.6 sat → up to +10% failure
+
+      // Existing children penalty: each existing child reduces desire for more
+      const kidsPenalty = agent.children * 0.12 // +12% per existing child
+
+      const conceptionFailure = Math.min(0.85, agePenalty + eduPenalty + wealthPenalty + satPenalty + kidsPenalty)
+      const adjustedBirthProb = birthProbPerTick * (1 - conceptionFailure)
+
+      if (bothSatisfied && atLeastOneEmployed && fertileAge && notTooManyKids && this.rng() < adjustedBirthProb) {
         agent.children++
         partner.children = agent.children // sync count
 
@@ -2292,20 +2317,36 @@ export class SimulationEngine {
         }
 
         // --- MARRIAGE: male + female, both single, both eligible, meet → potential marriage ---
-        if (this.canMarry(a) && this.canMarry(b) && a.gender !== b.gender && this.rng() < 0.08) {
-          this.tickMarriages++
-          a.partnerId = b.id
-          b.partnerId = a.id
-          // Second partner moves to first's home (shares housing status)
-          b.homeId = a.homeId
-          b.homeOwned = a.homeOwned
-          b.homeDebt = 0          // partner doesn't take on existing mortgage
-          b.homeDebtPayment = 0
-          b.homeValue = a.homeValue
-          a.satisfaction = clamp(a.satisfaction + 0.15, 0, 1)
-          b.satisfaction = clamp(b.satisfaction + 0.15, 0, 1)
-          a.lifeEvents.push({ tick: this.tick, type: 'married', description: `Married ${b.gender === 'male' ? '👨' : '👩'} partner` })
-          b.lifeEvents.push({ tick: this.tick, type: 'married', description: `Married ${a.gender === 'male' ? '👨' : '👩'} partner` })
+        // Demographic filters: educated women less likely to couple, poor men less likely to find partner
+        if (this.canMarry(a) && this.canMarry(b) && a.gender !== b.gender) {
+          const female = a.gender === 'female' ? a : b
+          const male = a.gender === 'male' ? a : b
+
+          // Female education penalty: high-edu women are more independent → less likely to couple
+          // low=0%, medium=15%, high=35% reduction
+          const femEduScore = female.education === 'high' ? 0.35 : female.education === 'medium' ? 0.15 : 0
+          const femEduFactor = 1 - femEduScore
+
+          // Male wealth penalty: poor men struggle to attract partners
+          // Below $50 wealth → up to 50% reduction; above $200 → no penalty
+          const maleWealthFactor = Math.min(1, Math.max(0.5, male.wealth / 200))
+
+          const marriageChance = 0.08 * femEduFactor * maleWealthFactor
+          if (this.rng() < marriageChance) {
+            this.tickMarriages++
+            a.partnerId = b.id
+            b.partnerId = a.id
+            // Second partner moves to first's home (shares housing status)
+            b.homeId = a.homeId
+            b.homeOwned = a.homeOwned
+            b.homeDebt = 0          // partner doesn't take on existing mortgage
+            b.homeDebtPayment = 0
+            b.homeValue = a.homeValue
+            a.satisfaction = clamp(a.satisfaction + 0.15, 0, 1)
+            b.satisfaction = clamp(b.satisfaction + 0.15, 0, 1)
+            a.lifeEvents.push({ tick: this.tick, type: 'married', description: `Married ${b.gender === 'male' ? '👨' : '👩'} partner` })
+            b.lifeEvents.push({ tick: this.tick, type: 'married', description: `Married ${a.gender === 'male' ? '👨' : '👩'} partner` })
+          }
         }
       }
     }

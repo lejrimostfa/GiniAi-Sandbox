@@ -219,8 +219,17 @@ function toggleSocietalSeries(key: string) {
   const s = societalVisible.value
   if (s.has(key)) s.delete(key)
   else s.add(key)
-  // Force reactivity
   societalVisible.value = new Set(s)
+}
+
+const allSocietalVisible = computed(() => societalVisible.value.size === societalSeriesConfig.length)
+
+function toggleAllSocietal() {
+  if (allSocietalVisible.value) {
+    societalVisible.value = new Set()
+  } else {
+    societalVisible.value = new Set(societalSeriesConfig.map(s => s.key))
+  }
 }
 
 const societalData = computed<ChartData<'line'>>(() => ({
@@ -405,6 +414,11 @@ function resetZoom() {
       <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
       <div v-show="activeTab === 'societal'" class="chart-wrap chart-wrap--societal">
         <div class="societal-toggles">
+          <label class="societal-toggle societal-toggle--all">
+            <input type="checkbox" :checked="allSocietalVisible" @change="toggleAllSocietal" />
+            <span class="societal-toggle__label">All</span>
+          </label>
+          <span class="societal-toggles__sep">|</span>
           <label v-for="s in societalSeriesConfig" :key="s.key" class="societal-toggle"
             :style="{ '--series-color': s.color }">
             <input type="checkbox" :checked="societalVisible.has(s.key)"
@@ -529,6 +543,13 @@ function resetZoom() {
   flex-shrink: 0;
 }
 
+.societal-toggles__sep {
+  color: $border-color;
+  font-size: 10px;
+  line-height: 1;
+  margin: 0 2px;
+}
+
 .societal-toggle {
   display: flex;
   align-items: center;
@@ -538,6 +559,11 @@ function resetZoom() {
   color: $text-muted;
   user-select: none;
   transition: color 0.15s;
+
+  &--all {
+    font-weight: 600;
+    color: $text-secondary;
+  }
 
   &:hover { color: $text-secondary; }
 
