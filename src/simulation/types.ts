@@ -113,7 +113,7 @@ export interface Agent {
 // ============================================================
 export interface LifeEvent {
   tick: number
-  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built'
+  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide'
   description: string
 }
 
@@ -316,6 +316,7 @@ export interface SimMetrics {
   businessOwnerCount: number
   retiredCount: number
   childCount: number
+  criminalCount: number
   // Inequality
   giniCoefficient: number
   medianWealth: number
@@ -332,6 +333,9 @@ export interface SimMetrics {
   automationRate: number         // robotic: automatedJobs / (totalJobs + automatedJobs + aiDisplacedJobs)
   aiDisplacementRate: number     // AI: aiDisplacedJobs / (totalJobs + automatedJobs + aiDisplacedJobs)
   totalDisplacementRate: number  // combined displacement rate
+  // Workers actually fired (subset of automatedJobs/aiDisplacedJobs — excludes empty slot elimination)
+  roboticFiredWorkers: number
+  aiFiredWorkers: number
   // Mobility
   classTransitions: number // agents who changed class this tick
   // Satisfaction

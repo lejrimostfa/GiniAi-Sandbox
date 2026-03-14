@@ -132,10 +132,12 @@ const autoData = computed<ChartData<'line'>>(() => ({
       borderColor: CHART_COLORS.worker, backgroundColor: CHART_COLORS.workerFill, fill: true },
     { label: 'Available Slots', data: sim.metricsHistory.map((m) => m.totalJobs),
       borderColor: CHART_COLORS.textMuted, backgroundColor: 'transparent', borderDash: [4, 4], fill: false },
-    { label: 'Robotic Automated', data: sim.metricsHistory.map((m) => m.automatedJobs),
+    { label: 'Workers Fired (Robotic)', data: sim.metricsHistory.map((m) => m.roboticFiredWorkers),
       borderColor: CHART_COLORS.stress, backgroundColor: CHART_COLORS.stressFill, fill: true },
-    { label: 'AI Displaced', data: sim.metricsHistory.map((m) => m.aiDisplacedJobs),
+    { label: 'Workers Fired (AI)', data: sim.metricsHistory.map((m) => m.aiFiredWorkers),
       borderColor: '#B07AE0', backgroundColor: 'rgba(176,122,224,0.15)', fill: true },
+    { label: 'Slots Eliminated (total)', data: sim.metricsHistory.map((m) => m.automatedJobs + m.aiDisplacedJobs),
+      borderColor: '#707080', backgroundColor: 'transparent', borderDash: [2, 3], fill: false },
   ],
 }))
 const autoOpts = computed<ChartOptions<'line'>>(() => {
@@ -223,6 +225,7 @@ const scatterMetricKeys = [
   { value: 'businessOwnerCount', label: 'Business Owners' },
   { value: 'retiredCount', label: 'Retired' },
   { value: 'childCount', label: 'Children' },
+  { value: 'criminalCount', label: 'Criminals' },
   // Economy
   { value: 'giniCoefficient', label: 'Gini' },
   { value: 'medianWealth', label: 'Median Wealth' },
@@ -252,6 +255,9 @@ const scatterMetricKeys = [
   { value: 'automationRate', label: 'Robotic Automation' },
   { value: 'aiDisplacementRate', label: 'AI Displacement' },
   { value: 'totalDisplacementRate', label: 'Total Displacement' },
+  // Workers fired by automation
+  { value: 'roboticFiredWorkers', label: 'Workers Fired (Robotic)' },
+  { value: 'aiFiredWorkers', label: 'Workers Fired (AI)' },
   // Housing
   { value: 'homeOwnerCount', label: 'Home Owners' },
   { value: 'mortgageCount', label: 'Mortgage Holders' },

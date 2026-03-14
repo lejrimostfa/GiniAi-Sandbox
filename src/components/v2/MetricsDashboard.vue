@@ -74,6 +74,13 @@ function fmtMoney(v: number | undefined): string {
       </div>
 
       <div class="metric-card">
+        <span class="metric-card__label">Criminals</span>
+        <span class="metric-card__value metric-card__value--red">
+          {{ m.criminalCount }} <small>({{ fmtPct(m.criminalCount / m.totalPopulation) }})</small>
+        </span>
+      </div>
+
+      <div class="metric-card">
         <span class="metric-card__label">Median Wealth</span>
         <span class="metric-card__value">{{ fmtMoney(m.medianWealth) }}</span>
       </div>
@@ -106,6 +113,16 @@ function fmtMoney(v: number | undefined): string {
       <div class="metric-card">
         <span class="metric-card__label">Jobs (filled)</span>
         <span class="metric-card__value">{{ m.filledJobs }}</span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-card__label">Workers Fired (Robot)</span>
+        <span class="metric-card__value metric-card__value--red">{{ m.roboticFiredWorkers }}</span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-card__label">Workers Fired (AI)</span>
+        <span class="metric-card__value metric-card__value--red">{{ m.aiFiredWorkers }}</span>
       </div>
 
       <div class="metric-card">

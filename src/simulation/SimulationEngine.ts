@@ -67,6 +67,14 @@ export class SimulationEngine {
   private tickLayoffs = 0
   private tickTaxRevenue = 0
   private tickRedistribution = 0
+
+  // --- Cumulative automation counters (survive workplace removal) ---
+  // Total slots eliminated (empty + filled)
+  private cumulativeAutomatedJobs = 0
+  private cumulativeAiDisplacedJobs = 0
+  // Workers actually fired by automation
+  private cumulativeRoboticFired = 0
+  private cumulativeAiFired = 0
   
   private rng: RNG
   private seed: number
@@ -84,6 +92,10 @@ export class SimulationEngine {
     this.agents = agents
     this.locations = locations
     this.tick = 0
+    this.cumulativeAutomatedJobs = 0
+    this.cumulativeAiDisplacedJobs = 0
+    this.cumulativeRoboticFired = 0
+    this.cumulativeAiFired = 0
 
     // Initial job assignment
     this.assignInitialJobs()
@@ -144,9 +156,10 @@ export class SimulationEngine {
     this.tickTaxRevenue = 0
     this.tickRedistribution = 0
 
-    // Reset per-tick earnings for all agents (used for taxation)
+    // Reset per-tick earnings and increment unemployment counters
     for (const agent of this.agents) {
       agent.tickEarnings = 0
+      if (agent.state === 'unemployed') agent.ticksUnemployed++
     }
 
     // 0. Remove dead agents that have persisted long enough (☠️ cleanup)
@@ -635,88 +648,86 @@ export class SimulationEngine {
       const emptySlots = wp.jobSlots - wp.filledSlots
 
       // --- Channel 1: Robotic/physical automation ---
-      // Primarily affects manual and service jobs
-      // Investment cost: ~20 weeks of the worker's wage (one-time capex)
-      // Arbitrage: owner saves the ongoing wage permanently
-      // Rates are annual — divide by ticksPerYear for per-tick probability
+      // A robot replaces multiple workers (2-4 at once) — much cheaper than human labor
       const roboticProb = (this.params.aiGrowthRate * config.automationRisk) / tpy
       if (this.rng() < roboticProb) {
-        // Priority: eliminate EMPTY slots first (cheaper — no severance, no HR)
-        // Then fire filled workers if no empty slots remain
-        if (emptySlots > 0) {
-          // Automate a vacant position — the job simply ceases to exist
-          wp.jobSlots = Math.max(0, wp.jobSlots - 1)
-          wp.automatedSlots++
-          if (owner && owner.state === 'business_owner') {
-            const investmentCost = (wp.wage ?? 30) * 10 // cheaper than firing (no severance)
-            owner.wealth -= investmentCost
-          }
-        } else if (wp.filledSlots > 0) {
-          // No empty slots — must fire a worker to automate their position
-          const worker = this.agents.find(
-            (a) => a.workplaceId === wp.id && a.state === 'employed'
-          )
-          if (worker) {
-            const investmentCost = (wp.wage ?? worker.income) * 20 // ~20 weeks capex
-            if (owner && owner.state === 'business_owner') {
-              owner.wealth -= investmentCost
-              owner.lifeEvents.push({
-                tick: this.tick, type: 'automation_savings',
-                description: `Invested $${Math.round(investmentCost)} in robotic automation (saves $${Math.round(wp.wage ?? worker.income)}/tick)`,
-              })
+        // How many slots does one robot replace? 2-4 depending on workplace type
+        const bulkSize = config.automationRisk > 0.5 ? 3 + Math.floor(this.rng() * 2) : 2 + Math.floor(this.rng() * 2)
+        const investPerSlot = (wp.wage ?? 30) * 10 // robot costs ~10 weeks of wage (vs 52 weeks/year human)
+
+        if (owner && owner.state === 'business_owner') {
+          owner.wealth -= investPerSlot * bulkSize
+          owner.lifeEvents.push({
+            tick: this.tick, type: 'automation_savings',
+            description: `Invested $${Math.round(investPerSlot * bulkSize)} in robot replacing ${bulkSize} workers`,
+          })
+        }
+
+        for (let i = 0; i < bulkSize && wp.jobSlots > 0; i++) {
+          // Fire a filled worker or eliminate an empty slot
+          if (wp.filledSlots > 0 && (emptySlots === 0 || this.rng() < 0.6)) {
+            const worker = this.agents.find(
+              (a) => a.workplaceId === wp.id && a.state === 'employed'
+            )
+            if (worker) {
+              this.fireAgent(worker, 'automated')
+              this.cumulativeRoboticFired++
             }
-            this.fireAgent(worker, 'automated')
+          } else if (wp.jobSlots > wp.filledSlots) {
+            wp.jobSlots = Math.max(0, wp.jobSlots - 1)
+            wp.automatedSlots++
           }
+          this.cumulativeAutomatedJobs++
         }
       }
 
       // --- Channel 2: AI/LLM displacement ---
-      // Primarily affects skilled, creative, and service-cognitive jobs
-      // AI tools cost: ~12 weeks of wage (cheaper than robotics, but still significant)
+      // One AI tool replaces 2-5 cognitive workers (even more efficient than robots)
       const aiProb = (this.params.aiDiffusionRate * config.aiExposure) / tpy
-      // Recompute empty slots after possible robotic automation above
-      const emptyAfterRobotic = wp.jobSlots - wp.filledSlots
       if (this.rng() < aiProb) {
-        // Priority: eliminate EMPTY slots first, then displace workers
-        if (emptyAfterRobotic > 0) {
-          // AI replaces a vacant cognitive position
-          wp.jobSlots = Math.max(0, wp.jobSlots - 1)
-          wp.aiDisplacedSlots++
-          if (owner && owner.state === 'business_owner') {
-            const aiInvestment = (wp.wage ?? 30) * 6 // AI tools for vacant slot (cheaper)
-            owner.wealth -= aiInvestment
+        // AI is even more scalable: 2-5 workers replaced per adoption event
+        const bulkSize = config.aiExposure > 0.5 ? 3 + Math.floor(this.rng() * 3) : 2 + Math.floor(this.rng() * 2)
+        const investPerSlot = (wp.wage ?? 30) * 6 // AI costs ~6 weeks of wage
+
+        if (owner && owner.state === 'business_owner') {
+          owner.wealth -= investPerSlot * bulkSize
+          owner.lifeEvents.push({
+            tick: this.tick, type: 'automation_savings',
+            description: `Invested $${Math.round(investPerSlot * bulkSize)} in AI replacing ${bulkSize} workers`,
+          })
+        }
+
+        // Sort workers by vulnerability: higher education + higher age = more exposed
+        const workers = this.agents.filter(
+          (a) => a.workplaceId === wp.id && a.state === 'employed'
+        ).sort((a, b) => {
+          const eduScore = (e: string) => e === 'high' ? 3 : e === 'medium' ? 2 : 1
+          const vulnA = eduScore(a.education) * 0.6 + (a.age / 80) * 0.4
+          const vulnB = eduScore(b.education) * 0.6 + (b.age / 80) * 0.4
+          return vulnB - vulnA
+        })
+
+        let workerIdx = 0
+        for (let i = 0; i < bulkSize && wp.jobSlots > 0; i++) {
+          const emptyNow = wp.jobSlots - wp.filledSlots
+          if (workerIdx < workers.length && (emptyNow === 0 || this.rng() < 0.7)) {
+            this.fireAgent(workers[workerIdx], 'ai_displaced')
+            this.cumulativeAiFired++
+            workerIdx++
+          } else if (wp.jobSlots > wp.filledSlots) {
+            wp.jobSlots = Math.max(0, wp.jobSlots - 1)
+            wp.aiDisplacedSlots++
           }
-        } else if (wp.filledSlots > 0) {
-          // No empty slots — must displace a worker
-          const workers = this.agents.filter(
-            (a) => a.workplaceId === wp.id && a.state === 'employed'
-          )
-          if (workers.length > 0) {
-            // Sort by vulnerability: higher education + higher age = more exposed to AI
-            workers.sort((a, b) => {
-              const eduScore = (e: string) => e === 'high' ? 3 : e === 'medium' ? 2 : 1
-              const vulnA = eduScore(a.education) * 0.6 + (a.age / 80) * 0.4
-              const vulnB = eduScore(b.education) * 0.6 + (b.age / 80) * 0.4
-              return vulnB - vulnA // most vulnerable first
-            })
-            const displaced = workers[0]
-            const aiInvestment = (wp.wage ?? displaced.income) * 12
-            if (owner && owner.state === 'business_owner') {
-              owner.wealth -= aiInvestment
-              owner.lifeEvents.push({
-                tick: this.tick, type: 'automation_savings',
-                description: `Invested $${Math.round(aiInvestment)} in AI tools (saves $${Math.round(wp.wage ?? displaced.income)}/tick)`,
-              })
-            }
-            this.fireAgent(displaced, 'ai_displaced')
-          }
+          this.cumulativeAiDisplacedJobs++
         }
       }
     }
 
     // --- AI creates new high-skill jobs (fewer slots, higher wages) ---
-    // Only create new workplaces when the labor market actually needs them (vacancy < 8%)
-    const creationProb = ((this.params.aiGrowthRate + this.params.aiDiffusionRate) * 0.2) / tpy
+    // New job creation is suppressed as displacement grows (automation destroys more than it creates)
+    // At 0% displacement → full creation rate. At 50% → 25% rate. At 80%+ → nearly 0.
+    const displacementDampener = Math.max(0.05, 1 - this.metrics.totalDisplacementRate * 2)
+    const creationProb = ((this.params.aiGrowthRate + this.params.aiDiffusionRate) * 0.2 * displacementDampener) / tpy
     if (this.rng() < creationProb && this.getVacancyRate() < 0.08) {
       const existingWp = this.locations.filter((l) => l.type === 'workplace')
       if (existingWp.length > 0) {
@@ -887,7 +898,6 @@ export class SimulationEngine {
 
     // Job Fair (Q2): unemployed converge on workplaces
     if (this.isAnnualQuarter(ANNUAL_Q2) && agent.state === 'unemployed') {
-      agent.ticksUnemployed++
       this.sendToHiringWorkplace(agent)
       agent.currentAction = 'job_seeking'
       return
@@ -966,7 +976,6 @@ export class SimulationEngine {
 
     // --- Unemployed: job search, study, benefits, shop, or stay home ---
     if (agent.state === 'unemployed') {
-      agent.ticksUnemployed++
       if (this.rng() < 0.40) {
         this.sendToHiringWorkplace(agent)
         agent.currentAction = 'job_seeking'
@@ -1188,30 +1197,44 @@ export class SimulationEngine {
     if (vec2Distance(agent.position, loc.position) > loc.radius + 2) return
 
     // --- Workplace: get hired if unemployed ---
-    // Age-based hiring penalty for AI-exposed occupations (Anthropic Economic Index):
-    //   Young workers (18-25): 14% hiring rate reduction in AI-exposed jobs
-    //   This models AI reducing entry-level cognitive job openings
+    // Hiring difficulty scales with ACTUAL displacement (not just parameter values)
     if (loc.type === 'workplace' && agent.state === 'unemployed') {
+      // Job search cooldown: recently fired agents need time to find new work
+      // Minimum 4 ticks (~1 month) of unemployment before eligible for rehiring
+      if (agent.ticksUnemployed < 4) return
+
       if (loc.filledSlots < loc.jobSlots) {
         const config = WORKPLACE_CONFIGS[loc.workplaceType!]
         const req = config.requiredEducation
         const skillReq = EDUCATION_SKILL_MAP[req]
         const agentSkill = EDUCATION_SKILL_MAP[agent.education]
         if (agentSkill >= skillReq * 0.7) {
-          // AI hiring penalty: young workers struggle more in AI-exposed occupations
+          // Use ACTUAL displacement rate from metrics (not static params)
+          const actualDisplacement = this.metrics.totalDisplacementRate // 0-1
+
+          // Base hiring penalty from actual displacement state:
+          // At 10% displacement → 15% penalty (mild friction)
+          // At 30% displacement → 45% penalty (structural unemployment)
+          // At 50% displacement → 75% penalty (mass unemployment)
+          let hiringPenalty = actualDisplacement * 1.5
+
+          // AI-exposed jobs: additional penalty for young workers
           const aiExposure = config.aiExposure
           const isYoung = agent.age >= 18 && agent.age <= 25
-          let hiringPenalty = isYoung
-            ? aiExposure * this.params.aiDiffusionRate * 1.4  // 14% base penalty scaled by diffusion
-            : 0
-          // Automation difficulty: low-education workers face harder hiring in automated economy
-          // The more automation, the harder it is for low-edu to find manual/service jobs
-          const totalDisplacement = (this.params.aiGrowthRate + this.params.aiDiffusionRate) / 2
-          if (agent.education === 'low') {
-            hiringPenalty += totalDisplacement * 0.6 // 60% penalty at max automation
-          } else if (agent.education === 'medium') {
-            hiringPenalty += totalDisplacement * 0.25 // 25% penalty
+          if (isYoung) {
+            hiringPenalty += aiExposure * actualDisplacement * 0.5
           }
+
+          // Education-specific: low-edu workers face structural exclusion
+          if (agent.education === 'low') {
+            hiringPenalty += actualDisplacement * 0.4
+          } else if (agent.education === 'medium') {
+            hiringPenalty += actualDisplacement * 0.15
+          }
+
+          // Cap at 0.95 (always a tiny chance to find work)
+          hiringPenalty = Math.min(0.95, hiringPenalty)
+
           if (this.rng() > hiringPenalty) {
             this.hireAgent(agent, loc)
           }
@@ -1442,23 +1465,23 @@ export class SimulationEngine {
 
       // Business creation — wealthy + educated agents become entrepreneurs
       // Guarded by vacancy rate: no new businesses if >10% of slots are already empty
-      // Higher automation makes it EASIER to start a business (lower barriers)
-      // but harder to sustain (1/10 survive long-term — enforced in processLoans)
-      if (cachedVacancyRate < 0.10) {
+      // Business creation: suppressed by actual displacement (fewer opportunities in automated economy)
+      // Guard: only when vacancy < 10% AND displacement is not too high
+      const actualDisplacement = this.metrics.totalDisplacementRate
+      if (cachedVacancyRate < 0.10 && actualDisplacement < 0.60) {
         const avgWealth = this.params.totalWealth / this.params.populationSize
-        const totalAutomation = (this.params.aiGrowthRate + this.params.aiDiffusionRate) / 2
-        // Automation lowers the wealth threshold for starting a business
-        const wealthThreshold = avgWealth * (1.2 - totalAutomation * 0.5) // drops from 1.2x to 0.7x
+        const wealthThreshold = avgWealth * 1.2
         const canEntrepreneurize =
           (agent.state === 'employed' || agent.state === 'unemployed') &&
           agent.ownedBusinessId === null &&
           agent.wealth > wealthThreshold &&
           (agent.education === 'high' || agent.education === 'medium') &&
-          agent.satisfaction > 0.35 && // lower threshold in automated economy
+          agent.satisfaction > 0.35 &&
           agent.creditScore > 0.3 &&
           agent.age >= 25 && agent.age <= 60
-        // Higher automation = more attempts (easier to start)
-        const bizChance = 0.04 + totalAutomation * 0.08 // 4%-12% per tick
+        // Annual rate ~4%, suppressed by displacement: at 30% displacement → halved
+        const annualBizRate = 0.04 * Math.max(0.1, 1 - actualDisplacement * 2)
+        const bizChance = annualBizRate / this.params.ticksPerYear
         if (canEntrepreneurize && this.rng() < bizChance) {
           this.createBusiness(agent)
         }
@@ -1800,7 +1823,17 @@ export class SimulationEngine {
   // ============================================================
   private processFamily(): void {
     // Runs every tick — birth probability is per-tick (annual rate / ticksPerYear)
-    const birthProbPerTick = 0.15 / this.params.ticksPerYear
+    const baseBirthProb = 0.15 / this.params.ticksPerYear
+
+    // --- Economic stress factor: high unemployment suppresses fertility ---
+    // Real-world: fertility drops ~1% for each 1% rise in unemployment
+    // Here: at 50% unemployment → birth rate halved
+    const living = this.agents.filter(a => a.state !== 'dead' && a.state !== 'child')
+    const unemployedCount = living.filter(a => a.state === 'unemployed').length
+    const unemploymentRate = living.length > 0 ? unemployedCount / living.length : 0
+    const econStressFactor = Math.max(0.2, 1 - unemploymentRate)
+    const birthProbPerTick = baseBirthProb * econStressFactor
+
     const newChildren: Agent[] = []
 
     for (const agent of this.agents) {
@@ -1811,13 +1844,14 @@ export class SimulationEngine {
       const partner = this.agents.find((a) => a.id === agent.partnerId)
       if (!partner || partner.state === 'dead') continue
 
-      // Baby conditions: both satisfied, both have income, age 20-45, limited children
+      // Baby conditions: at least one partner employed/business_owner, both satisfied, age 20-45, limited children
       const bothSatisfied = agent.satisfaction > 0.55 && partner.satisfaction > 0.55
-      const bothHaveIncome = agent.income > 0 && partner.income > 0
+      const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner')
+        || (partner.state === 'employed' || partner.state === 'business_owner')
       const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
       const notTooManyKids = agent.children < 4
 
-      if (bothSatisfied && bothHaveIncome && fertileAge && notTooManyKids && this.rng() < birthProbPerTick) {
+      if (bothSatisfied && atLeastOneEmployed && fertileAge && notTooManyKids && this.rng() < birthProbPerTick) {
         agent.children++
         partner.children = agent.children // sync count
 
@@ -1995,7 +2029,7 @@ export class SimulationEngine {
   // ============================================================
 
   // Thresholds for causal transitions
-  private static readonly CRIME_UNEMPLOYMENT_TICKS = 8   // ticks unemployed before crime risk
+  private static readonly CRIME_UNEMPLOYMENT_TICKS = 26  // ~6 months unemployed before crime risk
   private static readonly CRIME_WEALTH_THRESHOLD = 30    // poverty line for crime trigger
   private static readonly CRIME_SATISFACTION_THRESHOLD = 0.25
   private static readonly DISEASE_POVERTY_TICKS = 6      // ticks in poverty before sickness
@@ -2044,25 +2078,48 @@ export class SimulationEngine {
         // Only wealthy agents who visit healthcare locations can recover
       }
 
-      // --- CRIME (internal decision): prolonged unemployment + poverty → becomes criminal ---
-      // Causal chain: unemployed too long → desperate → turns to crime
-      // NOTE: Proximity to other criminals accelerates this (see processProximityInteractions)
-      if (agent.state === 'unemployed') {
-        const desperate = agent.ticksUnemployed >= SimulationEngine.CRIME_UNEMPLOYMENT_TICKS
-          && agent.wealth < SimulationEngine.CRIME_WEALTH_THRESHOLD
+      // --- PROLONGED UNEMPLOYMENT: multiple possible outcomes ---
+      // Not everyone turns to crime — diversified paths based on agent profile
+      if (agent.state === 'unemployed' && agent.ticksUnemployed >= SimulationEngine.CRIME_UNEMPLOYMENT_TICKS) {
+        const desperate = agent.wealth < SimulationEngine.CRIME_WEALTH_THRESHOLD
           && agent.satisfaction < SimulationEngine.CRIME_SATISFACTION_THRESHOLD
+
         if (desperate) {
-          const desperation = (agent.ticksUnemployed - SimulationEngine.CRIME_UNEMPLOYMENT_TICKS) * 0.03
-          if (this.rng() < 0.05 + desperation) {
-            agent.state = 'criminal'
-            agent.income = 0
-            agent.ticksAsCriminal = 0
-            agent.currentAction = 'stealing'
-            agent.lifeEvents.push({
-              tick: this.tick, type: 'became_criminal',
-              description: `Turned to crime after ${agent.ticksUnemployed} ticks of unemployment`,
-            })
+          const desperation = (agent.ticksUnemployed - SimulationEngine.CRIME_UNEMPLOYMENT_TICKS) * 0.02
+          const roll = this.rng()
+
+          if (roll < 0.03 + desperation * 0.4) {
+            // ~30% of desperate: CRIME — low-edu, young, no partner
+            if (agent.education === 'low' || (agent.age < 35 && !agent.partnerId)) {
+              agent.state = 'criminal'
+              agent.income = 0
+              agent.ticksAsCriminal = 0
+              agent.currentAction = 'stealing'
+              agent.lifeEvents.push({
+                tick: this.tick, type: 'became_criminal',
+                description: `Turned to crime after ${agent.ticksUnemployed} ticks of unemployment`,
+              })
+            }
+          } else if (roll < 0.05 + desperation * 0.3) {
+            // ~20% of desperate: DEPRESSION → sick (mental health crisis)
+            if (!agent.isSick) {
+              agent.isSick = true
+              agent.ticksSick = 0
+              agent.satisfaction = clamp(agent.satisfaction - 0.3, 0, 1)
+              agent.lifeEvents.push({
+                tick: this.tick, type: 'depression',
+                description: `Fell into depression after ${agent.ticksUnemployed} ticks of unemployment`,
+              })
+            }
+          } else if (roll < 0.06 + desperation * 0.2) {
+            // ~15% of desperate: SUICIDE — extreme despair, no partner, no wealth
+            if (agent.satisfaction < 0.10 && agent.wealth < -50 && !agent.partnerId) {
+              this.killAgent(agent, `Suicide after prolonged unemployment (${agent.ticksUnemployed} ticks)`)
+              this.tickPrematureDeaths++
+              continue
+            }
           }
+          // Remaining ~35%: stay unemployed (resilient, waiting, informal economy)
         }
       }
 
@@ -2124,6 +2181,26 @@ export class SimulationEngine {
               tick: this.tick, type: 'divorced',
               description: `Divorced after ${SimulationEngine.DIVORCE_LOW_SAT_TICKS}+ ticks of low satisfaction`,
             })
+
+            // --- Divorce suicide risk: 1/10 chance for each ex-partner ---
+            // Real-world: divorced individuals have significantly higher suicide rates
+            if (this.rng() < 0.10) {
+              agent.lifeEvents.push({
+                tick: this.tick, type: 'divorce_suicide',
+                description: 'Committed suicide following divorce',
+              })
+              this.killAgent(agent, 'Suicide following divorce')
+              this.tickPrematureDeaths++
+              continue
+            }
+            if (partner && partner.state !== 'dead' && this.rng() < 0.10) {
+              partner.lifeEvents.push({
+                tick: this.tick, type: 'divorce_suicide',
+                description: 'Committed suicide following divorce',
+              })
+              this.killAgent(partner, 'Suicide following divorce')
+              this.tickPrematureDeaths++
+            }
           }
         }
       }
@@ -2406,12 +2483,14 @@ export class SimulationEngine {
     const owners = agents.filter((a) => a.state === 'business_owner').length
     const retired = agents.filter((a) => a.state === 'retired').length
     const children = agents.filter((a) => a.state === 'child').length
+    const criminals = agents.filter((a) => a.state === 'criminal').length
 
     const workplaces = this.locations.filter((l) => l.type === 'workplace')
     const totalJobs = workplaces.reduce((s, w) => s + w.jobSlots, 0)
     const filledJobs = workplaces.reduce((s, w) => s + w.filledSlots, 0)
-    const automatedJobs = workplaces.reduce((s, w) => s + w.automatedSlots, 0)
-    const aiDisplacedJobs = workplaces.reduce((s, w) => s + w.aiDisplacedSlots, 0)
+    // Use cumulative counters (survive workplace removal)
+    const automatedJobs = this.cumulativeAutomatedJobs
+    const aiDisplacedJobs = this.cumulativeAiDisplacedJobs
     const totalSlots = totalJobs + automatedJobs + aiDisplacedJobs
 
     // Wealth distribution (use raw wealth for distribution stats)
@@ -2441,6 +2520,7 @@ export class SimulationEngine {
       businessOwnerCount: owners,
       retiredCount: retired,
       childCount: children,
+      criminalCount: criminals,
       giniCoefficient: computeGiniFast(wealths),
       medianWealth: median(rawWealths),
       meanWealth: totalWealth / N,
@@ -2454,6 +2534,8 @@ export class SimulationEngine {
       automationRate: totalSlots > 0 ? automatedJobs / totalSlots : 0,
       aiDisplacementRate: totalSlots > 0 ? aiDisplacedJobs / totalSlots : 0,
       totalDisplacementRate: totalSlots > 0 ? (automatedJobs + aiDisplacedJobs) / totalSlots : 0,
+      roboticFiredWorkers: this.cumulativeRoboticFired,
+      aiFiredWorkers: this.cumulativeAiFired,
       classTransitions: 0, // TODO: track state changes per tick if needed
       meanSatisfaction: satisfactions.reduce((a, b) => a + b, 0) / N,
       taxRevenue: this.tickTaxRevenue,
@@ -2474,8 +2556,8 @@ export class SimulationEngine {
       avgEducationLevel: avgEdu,
       // Housing
       homeOwnerCount: agents.filter(a => a.homeOwned && a.homeDebt <= 0).length,
-      mortgageCount: agents.filter(a => a.homeOwned && a.homeDebt > 0).length,
-      renterCount: agents.filter(a => !a.homeOwned).length,
+      mortgageCount: agents.filter(a => a.homeDebt > 0).length,
+      renterCount: agents.filter(a => !a.homeOwned && a.homeDebt <= 0).length,
       wealthDistribution: sortedWealth,
     }
   }
@@ -2499,12 +2581,13 @@ export class SimulationEngine {
     return {
       tick: 0, year: 0,
       totalPopulation: 0,
-      employedCount: 0, unemployedCount: 0, businessOwnerCount: 0, retiredCount: 0, childCount: 0,
+      employedCount: 0, unemployedCount: 0, businessOwnerCount: 0, retiredCount: 0, childCount: 0, criminalCount: 0,
       giniCoefficient: 0, medianWealth: 0, meanWealth: 0,
       top10WealthShare: 0, bottom50WealthShare: 0,
       medianIncome: 0,
       totalJobs: 0, filledJobs: 0, automatedJobs: 0, aiDisplacedJobs: 0,
       automationRate: 0, aiDisplacementRate: 0, totalDisplacementRate: 0,
+      roboticFiredWorkers: 0, aiFiredWorkers: 0,
       classTransitions: 0, meanSatisfaction: 0,
       taxRevenue: 0, redistributionPaid: 0,
       births: 0, deaths: 0, divorces: 0, marriages: 0,
