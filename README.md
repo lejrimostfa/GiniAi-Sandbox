@@ -19,7 +19,7 @@ GiniAi Sandbox is a **fully client-side, real-time simulation** of a miniature e
 
 The simulation visualizes how **inequality** (measured by the Gini coefficient) emerges from the interplay of education, employment, automation, taxation, and redistribution.
 
-![Main simulation view — agents moving between locations, heatmap overlay, metrics panel](public/1.png)
+![Main simulation view — agents moving between locations, heatmap overlay, metrics panel](public/7.png)
 *Full simulation view: 3D world with emoji agents, location buildings, heatmap overlay, parameter controls, and real-time metrics.*
 
 ---
@@ -56,6 +56,15 @@ The simulation visualizes how **inequality** (measured by the Gini coefficient) 
 
 ![Heatmap crime overlay on the 3D world](public/4.png)
 *Crime heatmap overlay — red zones indicate high criminal activity, often correlating with poverty clusters.*
+
+![Automation displacement and employment metrics](public/5.png)
+*Automation metrics: tracking workers fired by robots vs AI, filled jobs declining as displacement accelerates.*
+
+![Agent inspector — detailed life events and stats](public/6.png)
+*Agent inspector: full life history, wealth sparkline, and causal event log for any selected agent.*
+
+![Updated simulation with diverse agent states](public/1.png)
+*Close-up view: emoji agents reflecting diverse states — employed, unemployed, criminals, retirees, children.*
 
 ---
 

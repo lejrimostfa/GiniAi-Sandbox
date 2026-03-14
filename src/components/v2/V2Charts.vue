@@ -7,6 +7,7 @@ import { ref, computed } from 'vue'
 import { Line, Bar, Scatter } from 'vue-chartjs'
 import { Chart as ChartJS } from 'chart.js'
 import { useSimStore } from '../../stores/v2SimulationStore'
+import type { SimMetrics } from '../../simulation/types'
 import { baseLineOptions, CHART_COLORS, ZOOM_OPTIONS } from '../charts/chartConfig'
 import type { ChartData, ChartOptions } from 'chart.js'
 
@@ -182,27 +183,57 @@ const housingOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- Societal Phenomena chart ---
+// --- Societal Phenomena chart (with toggle checkboxes) ---
+interface SocietalSeries {
+  key: string
+  label: string
+  color: string
+  dash?: number[]
+  accessor: (m: SimMetrics) => number
+}
+const societalSeriesConfig: SocietalSeries[] = [
+  { key: 'births', label: 'Births', color: '#81B29A', accessor: m => m.births },
+  { key: 'deaths', label: 'Deaths', color: '#707080', accessor: m => m.deaths },
+  { key: 'prematureDeaths', label: 'Premature Deaths', color: '#C44536', accessor: m => m.prematureDeaths },
+  { key: 'diseases', label: 'Diseases', color: '#E07A5F', dash: [3, 2], accessor: m => m.diseases },
+  { key: 'crimes', label: 'Crimes', color: '#9B72AA', accessor: m => m.crimes },
+  { key: 'criminals', label: 'Criminals', color: '#CC3333', dash: [4, 2], accessor: m => m.criminalCount },
+  { key: 'divorces', label: 'Divorces', color: '#D4A574', dash: [5, 3], accessor: m => m.divorces },
+  { key: 'marriages', label: 'Marriages', color: '#F2CC8F', accessor: m => m.marriages },
+  { key: 'layoffs', label: 'Layoffs', color: '#E63946', dash: [6, 2], accessor: m => m.layoffs },
+  { key: 'unemployed', label: 'Unemployed', color: '#FF8C42', accessor: m => m.unemployedCount },
+  { key: 'robotFired', label: 'Robot Fired', color: '#4A90D9', dash: [4, 3], accessor: m => m.roboticFiredWorkers },
+  { key: 'aiFired', label: 'AI Fired', color: '#7B68EE', dash: [4, 3], accessor: m => m.aiFiredWorkers },
+  { key: 'taxRevenue', label: 'Tax Revenue', color: '#6BBF59', dash: [2, 2], accessor: m => m.taxRevenue },
+  { key: 'redistribution', label: 'Redistribution', color: '#45B7D1', dash: [2, 2], accessor: m => m.redistributionPaid },
+  { key: 'satisfaction', label: 'Satisfaction ×100', color: '#FFD700', accessor: m => Math.round(m.meanSatisfaction * 100) },
+  { key: 'classTransitions', label: 'Class Transitions', color: '#B8860B', dash: [3, 3], accessor: m => m.classTransitions },
+]
+
+// Default visible series (most important ones)
+const societalVisible = ref<Set<string>>(new Set([
+  'births', 'deaths', 'prematureDeaths', 'diseases', 'crimes', 'divorces', 'marriages', 'layoffs'
+]))
+
+function toggleSocietalSeries(key: string) {
+  const s = societalVisible.value
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  // Force reactivity
+  societalVisible.value = new Set(s)
+}
+
 const societalData = computed<ChartData<'line'>>(() => ({
   labels: labels.value,
-  datasets: [
-    { label: 'Births', data: sim.metricsHistory.map(m => m.births),
-      borderColor: '#81B29A', backgroundColor: 'transparent' },
-    { label: 'Deaths', data: sim.metricsHistory.map(m => m.deaths),
-      borderColor: '#707080', backgroundColor: 'transparent' },
-    { label: 'Premature Deaths', data: sim.metricsHistory.map(m => m.prematureDeaths),
-      borderColor: '#C44536', backgroundColor: 'transparent' },
-    { label: 'Diseases', data: sim.metricsHistory.map(m => m.diseases),
-      borderColor: '#E07A5F', backgroundColor: 'transparent', borderDash: [3, 2] },
-    { label: 'Crimes', data: sim.metricsHistory.map(m => m.crimes),
-      borderColor: '#9B72AA', backgroundColor: 'transparent' },
-    { label: 'Divorces', data: sim.metricsHistory.map(m => m.divorces),
-      borderColor: '#D4A574', backgroundColor: 'transparent', borderDash: [5, 3] },
-    { label: 'Marriages', data: sim.metricsHistory.map(m => m.marriages),
-      borderColor: '#F2CC8F', backgroundColor: 'transparent' },
-    { label: 'Layoffs', data: sim.metricsHistory.map(m => m.layoffs),
-      borderColor: '#E63946', backgroundColor: 'transparent', borderDash: [6, 2] },
-  ],
+  datasets: societalSeriesConfig
+    .filter(s => societalVisible.value.has(s.key))
+    .map(s => ({
+      label: s.label,
+      data: sim.metricsHistory.map(s.accessor),
+      borderColor: s.color,
+      backgroundColor: 'transparent',
+      ...(s.dash ? { borderDash: s.dash } : {}),
+    })),
 }))
 const societalOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Societal Phenomena')
@@ -372,7 +403,18 @@ function resetZoom() {
       <div v-show="activeTab === 'wealthDist'" class="chart-wrap"><Bar ref="wealthDistChart" :data="wealthDistData" :options="wealthDistOpts" /></div>
       <div v-show="activeTab === 'automation'" class="chart-wrap"><Line ref="autoChart" :data="autoData" :options="autoOpts" /></div>
       <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
-      <div v-show="activeTab === 'societal'" class="chart-wrap"><Line ref="societalChart" :data="societalData" :options="societalOpts" /></div>
+      <div v-show="activeTab === 'societal'" class="chart-wrap chart-wrap--societal">
+        <div class="societal-toggles">
+          <label v-for="s in societalSeriesConfig" :key="s.key" class="societal-toggle"
+            :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="societalVisible.has(s.key)"
+              @change="toggleSocietalSeries(s.key)" />
+            <span class="societal-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="societal-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="societalChart" :data="societalData" :options="societalOpts" />
+      </div>
       <div v-show="activeTab === 'housing'" class="chart-wrap"><Line ref="housingChart" :data="housingData" :options="housingOpts" /></div>
       <div v-show="activeTab === 'scatter'" class="chart-wrap chart-wrap--scatter">
         <div class="scatter-controls">
@@ -470,6 +512,52 @@ function resetZoom() {
   &--scatter {
     display: flex;
     flex-direction: column;
+  }
+}
+
+.chart-wrap--societal {
+  display: flex;
+  flex-direction: column;
+}
+
+.societal-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 4px 0;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.societal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  color: $text-muted;
+  user-select: none;
+  transition: color 0.15s;
+
+  &:hover { color: $text-secondary; }
+
+  input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--series-color);
+  }
+
+  &__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  &__label {
+    white-space: nowrap;
   }
 }
 

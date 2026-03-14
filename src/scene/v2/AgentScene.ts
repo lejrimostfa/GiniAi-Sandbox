@@ -28,7 +28,7 @@ function agentEmoji(state: AgentState, action: AgentAction, gender: Gender): str
   switch (action) {
     case 'working':     return isFemale ? '🏃‍♀️' : '🏃'
     case 'shopping':    return '🛒'
-    case 'job_seeking': return isFemale ? '�' : '�'
+    case 'job_seeking': return isFemale ? '🤷‍♀️' : '🤷‍♂️'
     case 'studying':    return '📚'
     case 'commuting':   return isFemale ? '🚶‍♀️' : '🚶'
     case 'hauling':     return '📦'
@@ -38,8 +38,8 @@ function agentEmoji(state: AgentState, action: AgentAction, gender: Gender): str
     case 'idle':
     default:
       return state === 'unemployed'
-        ? (isFemale ? '🧍‍♀️' : '🧍')
-        : (isFemale ? '👩' : '👤')
+        ? (isFemale ? '🤷‍♀️' : '🤷‍♂️')
+        : (isFemale ? '👩' : '👨')
   }
 }
 
