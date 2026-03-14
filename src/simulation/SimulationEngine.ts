@@ -68,6 +68,17 @@ export class SimulationEngine {
   private tickTaxRevenue = 0
   private tickRedistribution = 0
 
+  // --- Rolling window buffers for smooth rate computation ---
+  private readonly RATE_WINDOW = 12 // 12-tick (~3 month) rolling window
+  private recentBirths: number[] = []
+  private recentCrimes: number[] = []
+  private recentDiseases: number[] = []
+
+  private rollingAvg(buf: number[]): number {
+    if (buf.length === 0) return 0
+    return buf.reduce((a, b) => a + b, 0) / buf.length
+  }
+
   // --- Cumulative automation counters (survive workplace removal) ---
   // Total slots eliminated (empty + filled)
   private cumulativeAutomatedJobs = 0
@@ -96,6 +107,9 @@ export class SimulationEngine {
     this.cumulativeAiDisplacedJobs = 0
     this.cumulativeRoboticFired = 0
     this.cumulativeAiFired = 0
+    this.recentBirths = []
+    this.recentCrimes = []
+    this.recentDiseases = []
 
     // Initial job assignment
     this.assignInitialJobs()
@@ -2602,7 +2616,15 @@ export class SimulationEngine {
     // Effective tax rate
     const taxRate = this.params.redistributionLevel * 0.3
 
-    // Societal rates (annualized: per 1000 pop per year)
+    // Push tick counts into rolling buffers and trim to window size
+    this.recentBirths.push(this.tickBirths)
+    this.recentCrimes.push(this.tickCrimes)
+    this.recentDiseases.push(this.tickDiseases)
+    if (this.recentBirths.length > this.RATE_WINDOW) this.recentBirths.shift()
+    if (this.recentCrimes.length > this.RATE_WINDOW) this.recentCrimes.shift()
+    if (this.recentDiseases.length > this.RATE_WINDOW) this.recentDiseases.shift()
+
+    // Societal rates (annualized: per 1000 pop per year, smoothed over rolling window)
     const tpy = this.params.ticksPerYear
 
     return {
@@ -2643,9 +2665,9 @@ export class SimulationEngine {
       diseases: this.tickDiseases,
       crimes: this.tickCrimes,
       layoffs: this.tickLayoffs,
-      fertilityRate: N > 0 ? (this.tickBirths / N) * 1000 * tpy : 0,
-      crimeRate: N > 0 ? (this.tickCrimes / N) * 1000 * tpy : 0,
-      diseaseRate: N > 0 ? (this.tickDiseases / N) * 1000 * tpy : 0,
+      fertilityRate: N > 0 ? (this.rollingAvg(this.recentBirths) / N) * 1000 * tpy : 0,
+      crimeRate: N > 0 ? (this.rollingAvg(this.recentCrimes) / N) * 1000 * tpy : 0,
+      diseaseRate: N > 0 ? (this.rollingAvg(this.recentDiseases) / N) * 1000 * tpy : 0,
       effectiveTaxRate: taxRate,
       avgEducationLevel: avgEdu,
       // Housing

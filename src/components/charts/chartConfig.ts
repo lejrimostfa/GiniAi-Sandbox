@@ -118,6 +118,7 @@ export function baseLineOptions(title: string): ChartOptions<'line'> {
     },
     scales: {
       x: {
+        type: 'category',
         title: {
           display: true,
           text: 'Week',
@@ -128,8 +129,11 @@ export function baseLineOptions(title: string): ChartOptions<'line'> {
           color: CHART_COLORS.textMuted,
           font: { size: 9 },
           maxTicksLimit: 12,
+          autoSkip: true,
+          maxRotation: 0,
         },
         grid: { color: CHART_COLORS.grid },
+        offset: false,
       },
       y: {
         ticks: {

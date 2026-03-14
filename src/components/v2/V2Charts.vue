@@ -3,7 +3,7 @@
 // Tabbed charts: Gini, Employment, Wealth, Automation, Satisfaction,
 // Wealth Distribution (bar), Societal Phenomena (line), Cross-Variable (scatter)
 
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { Line, Bar, Scatter } from 'vue-chartjs'
 import { Chart as ChartJS } from 'chart.js'
 import { useSimStore } from '../../stores/v2SimulationStore'
@@ -58,6 +58,10 @@ const empData = computed<ChartData<'line'>>(() => ({
       borderColor: CHART_COLORS.precarious, backgroundColor: CHART_COLORS.precariousFill, fill: true },
     { label: 'Business Owners', data: sim.metricsHistory.map((m) => m.businessOwnerCount),
       borderColor: 'rgba(155, 114, 170, 1)', backgroundColor: 'rgba(155, 114, 170, 0.15)', fill: true },
+    { label: 'Retired', data: sim.metricsHistory.map((m) => m.retiredCount),
+      borderColor: 'rgba(180, 160, 120, 1)', backgroundColor: 'rgba(180, 160, 120, 0.15)', fill: true, borderDash: [4, 2] },
+    { label: 'Children', data: sim.metricsHistory.map((m) => m.childCount),
+      borderColor: 'rgba(100, 180, 220, 1)', backgroundColor: 'rgba(100, 180, 220, 0.15)', fill: true, borderDash: [3, 2] },
   ],
 }))
 const empOpts = computed<ChartOptions<'line'>>(() => {
@@ -464,6 +468,18 @@ function resetZoom() {
   const instance = chartRef?.value?.chart as ChartJS | undefined
   if (instance) instance.resetZoom()
 }
+
+// Fix v-show chart sizing: when a tab becomes visible, Chart.js must recalculate its container dimensions
+watch(activeTab, () => {
+  nextTick(() => {
+    const chartRef = chartRefs[activeTab.value]
+    const instance = chartRef?.value?.chart as ChartJS | undefined
+    if (instance) {
+      instance.resetZoom()
+      instance.resize()
+    }
+  })
+})
 </script>
 
 <template>
