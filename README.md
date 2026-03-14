@@ -9,6 +9,10 @@
 
 ---
 
+> **Note:** This is an experimental prototype. The simulation mechanics, parameters, and UI may require further adjusting and enhancing. Contributions and feedback are welcome!
+
+---
+
 ## Overview
 
 GiniAi Sandbox is a **fully client-side, real-time simulation** of a miniature economy where hundreds of autonomous agents live, work, marry, have children, get sick, commit crimes, start businesses, retire, and die — all governed by causal mechanics inspired by real-world socio-economic research.

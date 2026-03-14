@@ -21,6 +21,7 @@ const tabs = [
   { id: 'automation', label: 'Automation' },
   { id: 'satisfaction', label: 'Satisfaction' },
   { id: 'societal', label: 'Societal' },
+  { id: 'housing', label: 'Housing' },
   { id: 'scatter', label: 'Cross-Var' },
 ]
 
@@ -160,6 +161,25 @@ const satOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
+// --- Housing chart (Owners vs Mortgage vs Renters) ---
+const housingData = computed<ChartData<'line'>>(() => ({
+  labels: labels.value,
+  datasets: [
+    { label: 'Owners', data: sim.metricsHistory.map(m => m.homeOwnerCount),
+      borderColor: '#81B29A', backgroundColor: 'rgba(129,178,154,0.15)', fill: true },
+    { label: 'Mortgage', data: sim.metricsHistory.map(m => m.mortgageCount),
+      borderColor: '#F2CC8F', backgroundColor: 'rgba(242,204,143,0.15)', fill: true },
+    { label: 'Renters', data: sim.metricsHistory.map(m => m.renterCount),
+      borderColor: '#E07A5F', backgroundColor: 'rgba(224,122,95,0.15)', fill: true },
+  ],
+}))
+const housingOpts = computed<ChartOptions<'line'>>(() => {
+  const o = baseLineOptions('Home Ownership vs Renting')
+  o.scales!.y = { ...o.scales!.y, min: 0,
+    title: { display: true, text: 'Agent Count', color: CHART_COLORS.textMuted, font: { size: 10 } } }
+  return o
+})
+
 // --- Societal Phenomena chart ---
 const societalData = computed<ChartData<'line'>>(() => ({
   labels: labels.value,
@@ -232,6 +252,10 @@ const scatterMetricKeys = [
   { value: 'automationRate', label: 'Robotic Automation' },
   { value: 'aiDisplacementRate', label: 'AI Displacement' },
   { value: 'totalDisplacementRate', label: 'Total Displacement' },
+  // Housing
+  { value: 'homeOwnerCount', label: 'Home Owners' },
+  { value: 'mortgageCount', label: 'Mortgage Holders' },
+  { value: 'renterCount', label: 'Renters' },
 ]
 
 function getMetricValue(m: Record<string, unknown>, key: string): number {
@@ -301,13 +325,14 @@ const wealthDistChart = ref<InstanceType<typeof Bar> | null>(null)
 const autoChart = ref<InstanceType<typeof Line> | null>(null)
 const satChart = ref<InstanceType<typeof Line> | null>(null)
 const societalChart = ref<InstanceType<typeof Line> | null>(null)
+const housingChart = ref<InstanceType<typeof Line> | null>(null)
 const scatterChart = ref<InstanceType<typeof Scatter> | null>(null)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chartRefs: Record<string, ReturnType<typeof ref<any>>> = {
   gini: giniChart, employment: empChart, wealth: wealthChart,
   wealthDist: wealthDistChart, automation: autoChart,
-  satisfaction: satChart, societal: societalChart, scatter: scatterChart,
+  satisfaction: satChart, societal: societalChart, housing: housingChart, scatter: scatterChart,
 }
 
 function resetZoom() {
@@ -342,6 +367,7 @@ function resetZoom() {
       <div v-show="activeTab === 'automation'" class="chart-wrap"><Line ref="autoChart" :data="autoData" :options="autoOpts" /></div>
       <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
       <div v-show="activeTab === 'societal'" class="chart-wrap"><Line ref="societalChart" :data="societalData" :options="societalOpts" /></div>
+      <div v-show="activeTab === 'housing'" class="chart-wrap"><Line ref="housingChart" :data="housingData" :options="housingOpts" /></div>
       <div v-show="activeTab === 'scatter'" class="chart-wrap chart-wrap--scatter">
         <div class="scatter-controls">
           <label>X: <select v-model="scatterX">

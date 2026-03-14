@@ -284,6 +284,8 @@ export interface SimulationParams {
   economyType: EconomyType
   // Simulation
   ticksPerYear: number          // how many ticks = 1 sim year (default 52, 1 tick = 1 week)
+  // Toggles
+  diseasesEnabled: boolean       // whether disease onset & contagion are active
 }
 
 export const DEFAULT_PARAMS: SimulationParams = {
@@ -292,12 +294,13 @@ export const DEFAULT_PARAMS: SimulationParams = {
   startingGini: 0.35,
   totalWealth: 100000,
   educationMix: { low: 0.30, medium: 0.50, high: 0.20 },
-  aiGrowthRate: 0.05,
-  aiDiffusionRate: 0.08,        // AI displaces jobs faster than robotic automation
+  aiGrowthRate: 0.15,
+  aiDiffusionRate: 0.20,        // AI displaces jobs faster than robotic automation
   redistributionLevel: 0.30,
   economyType: 'industrial',
   ticksPerYear: 52,
   enableUBI: false,
+  diseasesEnabled: false,
 }
 
 // ============================================================
@@ -350,6 +353,10 @@ export interface SimMetrics {
   diseaseRate: number           // diseases per 1000 pop per year
   effectiveTaxRate: number      // actual avg tax rate
   avgEducationLevel: number     // 0-1 (low=0.2, med=0.5, high=0.9)
+  // Housing
+  homeOwnerCount: number        // agents who own their home (no mortgage remaining)
+  mortgageCount: number         // agents with active mortgage
+  renterCount: number           // agents renting
   // --- Wealth distribution snapshot (sorted array for bar chart) ---
   wealthDistribution: number[]  // all agent wealths, sorted ascending
 }

@@ -26,6 +26,7 @@ const aiRate = ref(sim.params.aiGrowthRate * 100)
 const aiDiffusion = ref(sim.params.aiDiffusionRate * 100)
 const redistribution = ref(sim.params.redistributionLevel * 100)
 const enableUBI = ref(sim.params.enableUBI)
+const diseasesEnabled = ref(sim.params.diseasesEnabled)
 const economyType = ref<EconomyType>(sim.params.economyType)
 
 const eduTotal = computed(() => Math.round(eduLow.value + eduMed.value + eduHigh.value))
@@ -77,6 +78,7 @@ watch(aiRate, (v) => sim.updateParams({ aiGrowthRate: v / 100 }))
 watch(aiDiffusion, (v) => sim.updateParams({ aiDiffusionRate: v / 100 }))
 watch(redistribution, (v) => sim.updateParams({ redistributionLevel: v / 100 }))
 watch(enableUBI, (v) => sim.updateParams({ enableUBI: v }))
+watch(diseasesEnabled, (v) => sim.updateParams({ diseasesEnabled: v }))
 
 // --- Reset simulation with current params ---
 function resetSim() {
@@ -96,6 +98,7 @@ function resetSim() {
     aiDiffusionRate: aiDiffusion.value / 100,
     redistributionLevel: redistribution.value / 100,
     enableUBI: enableUBI.value,
+    diseasesEnabled: diseasesEnabled.value,
     economyType: economyType.value,
   })
 }
@@ -182,7 +185,7 @@ function resetSim() {
         Robotic Automation
         <span class="param-value">{{ aiRate.toFixed(0) }}%/yr</span>
       </label>
-      <input type="range" v-model.number="aiRate" :min="0" :max="15" :step="0.5" />
+      <input type="range" v-model.number="aiRate" :min="0" :max="50" :step="1" />
       <div class="param-hint">Physical/manual job automation (factories, warehouses)</div>
     </div>
 
@@ -191,7 +194,7 @@ function resetSim() {
         AI Diffusion Rate
         <span class="param-value">{{ aiDiffusion.toFixed(0) }}%/yr</span>
       </label>
-      <input type="range" v-model.number="aiDiffusion" :min="0" :max="20" :step="0.5" />
+      <input type="range" v-model.number="aiDiffusion" :min="0" :max="50" :step="1" />
       <div class="param-hint">AI/LLM displacement of cognitive work (Anthropic data)</div>
     </div>
 
@@ -210,6 +213,14 @@ function resetSim() {
         <span>Enable UBI (Universal Basic Income)</span>
       </label>
       <div class="param-hint">When enabled, surplus tax revenue is distributed equally to all agents</div>
+    </div>
+
+    <div class="param-group">
+      <label class="ubi-toggle">
+        <input type="checkbox" v-model="diseasesEnabled" />
+        <span>Enable Diseases</span>
+      </label>
+      <div class="param-hint">When disabled, agents cannot fall ill or spread contagion</div>
     </div>
 
     <button class="reset-btn" @click="resetSim">

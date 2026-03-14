@@ -156,9 +156,11 @@ export class SimulationEngine {
     this.ageAgents()
     this.renewPopulation()
 
-    // 2. Automation + annual processes (once per year)
+    // 2. Automation runs every tick (probabilities are per-tick scaled)
+    this.runAutomation()
+
+    // Annual processes (once per year)
     if (this.tick % this.params.ticksPerYear === 0) {
-      this.runAutomation()
       this.processHousing()
     }
 
@@ -625,6 +627,7 @@ export class SimulationEngine {
     const workplaces = this.locations.filter(
       (l) => l.type === 'workplace' && l.jobSlots > 0
     )
+    const tpy = this.params.ticksPerYear
 
     for (const wp of workplaces) {
       const config = WORKPLACE_CONFIGS[wp.workplaceType!]
@@ -635,7 +638,8 @@ export class SimulationEngine {
       // Primarily affects manual and service jobs
       // Investment cost: ~20 weeks of the worker's wage (one-time capex)
       // Arbitrage: owner saves the ongoing wage permanently
-      const roboticProb = this.params.aiGrowthRate * config.automationRisk
+      // Rates are annual — divide by ticksPerYear for per-tick probability
+      const roboticProb = (this.params.aiGrowthRate * config.automationRisk) / tpy
       if (this.rng() < roboticProb) {
         // Priority: eliminate EMPTY slots first (cheaper — no severance, no HR)
         // Then fire filled workers if no empty slots remain
@@ -669,7 +673,7 @@ export class SimulationEngine {
       // --- Channel 2: AI/LLM displacement ---
       // Primarily affects skilled, creative, and service-cognitive jobs
       // AI tools cost: ~12 weeks of wage (cheaper than robotics, but still significant)
-      const aiProb = this.params.aiDiffusionRate * config.aiExposure
+      const aiProb = (this.params.aiDiffusionRate * config.aiExposure) / tpy
       // Recompute empty slots after possible robotic automation above
       const emptyAfterRobotic = wp.jobSlots - wp.filledSlots
       if (this.rng() < aiProb) {
@@ -712,7 +716,7 @@ export class SimulationEngine {
 
     // --- AI creates new high-skill jobs (fewer slots, higher wages) ---
     // Only create new workplaces when the labor market actually needs them (vacancy < 8%)
-    const creationProb = (this.params.aiGrowthRate + this.params.aiDiffusionRate) * 0.2
+    const creationProb = ((this.params.aiGrowthRate + this.params.aiDiffusionRate) * 0.2) / tpy
     if (this.rng() < creationProb && this.getVacancyRate() < 0.08) {
       const existingWp = this.locations.filter((l) => l.type === 'workplace')
       if (existingWp.length > 0) {
@@ -2019,7 +2023,7 @@ export class SimulationEngine {
       // --- DISEASE (internal): caused by sustained poverty + low satisfaction ---
       // Causal chain: poor for many ticks → body breaks down → sick
       // NOTE: Disease can also SPREAD by proximity (see processProximityInteractions)
-      if (!agent.isSick) {
+      if (!agent.isSick && this.params.diseasesEnabled) {
         const inPoverty = agent.wealth < SimulationEngine.DISEASE_WEALTH_THRESHOLD
         const lowSat = agent.satisfaction < 0.35
         if (inPoverty && lowSat && agent.ticksLowSatisfaction >= SimulationEngine.DISEASE_POVERTY_TICKS) {
@@ -2032,7 +2036,7 @@ export class SimulationEngine {
             this.tickDiseases++
           }
         }
-      } else {
+      } else if (agent.isSick) {
         // Already sick — track duration, satisfaction decays
         agent.ticksSick++
         agent.satisfaction = clamp(agent.satisfaction - 0.03, 0, 1)
@@ -2075,7 +2079,7 @@ export class SimulationEngine {
       }
 
       // --- PREMATURE DEATH: caused by prolonged sickness + poverty + age ---
-      if (agent.isSick && agent.ticksSick >= SimulationEngine.DEATH_SICK_TICKS) {
+      if (this.params.diseasesEnabled && agent.isSick && agent.ticksSick >= SimulationEngine.DEATH_SICK_TICKS) {
         const ageFactor = agent.age > 50 ? 0.03 : 0.005
         const wealthFactor = agent.wealth < 0 ? 0.04 : 0.01
         if (this.rng() < ageFactor + wealthFactor) {
@@ -2156,21 +2160,23 @@ export class SimulationEngine {
         }
 
         // --- DISEASE CONTAGION: sick agent near healthy → transmission risk ---
-        if (a.isSick && !b.isSick && b.state !== 'dead') {
-          if (this.rng() < 0.04) { // 4% per-encounter transmission
-            b.isSick = true
-            b.ticksSick = 0
-            b.satisfaction = clamp(b.satisfaction - 0.1, 0, 1)
-            b.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Caught illness from nearby agent' })
-            this.tickDiseases++
-          }
-        } else if (b.isSick && !a.isSick && a.state !== 'dead') {
-          if (this.rng() < 0.04) {
-            a.isSick = true
-            a.ticksSick = 0
-            a.satisfaction = clamp(a.satisfaction - 0.1, 0, 1)
-            a.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Caught illness from nearby agent' })
-            this.tickDiseases++
+        if (this.params.diseasesEnabled) {
+          if (a.isSick && !b.isSick && b.state !== 'dead') {
+            if (this.rng() < 0.04) { // 4% per-encounter transmission
+              b.isSick = true
+              b.ticksSick = 0
+              b.satisfaction = clamp(b.satisfaction - 0.1, 0, 1)
+              b.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Caught illness from nearby agent' })
+              this.tickDiseases++
+            }
+          } else if (b.isSick && !a.isSick && a.state !== 'dead') {
+            if (this.rng() < 0.04) {
+              a.isSick = true
+              a.ticksSick = 0
+              a.satisfaction = clamp(a.satisfaction - 0.1, 0, 1)
+              a.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Caught illness from nearby agent' })
+              this.tickDiseases++
+            }
           }
         }
 
@@ -2466,6 +2472,10 @@ export class SimulationEngine {
       diseaseRate: N > 0 ? (this.tickDiseases / N) * 1000 * tpy : 0,
       effectiveTaxRate: taxRate,
       avgEducationLevel: avgEdu,
+      // Housing
+      homeOwnerCount: agents.filter(a => a.homeOwned && a.homeDebt <= 0).length,
+      mortgageCount: agents.filter(a => a.homeOwned && a.homeDebt > 0).length,
+      renterCount: agents.filter(a => !a.homeOwned).length,
       wealthDistribution: sortedWealth,
     }
   }
@@ -2501,6 +2511,7 @@ export class SimulationEngine {
       prematureDeaths: 0, diseases: 0, crimes: 0, layoffs: 0,
       fertilityRate: 0, crimeRate: 0, diseaseRate: 0,
       effectiveTaxRate: 0, avgEducationLevel: 0.5,
+      homeOwnerCount: 0, mortgageCount: 0, renterCount: 0,
       wealthDistribution: [],
     }
   }
@@ -2508,6 +2519,15 @@ export class SimulationEngine {
   // --- Update params live ---
   updateParams(newParams: Partial<SimulationParams>): void {
     Object.assign(this.params, newParams)
+    // When diseases are toggled off, cure all currently sick agents immediately
+    if (newParams.diseasesEnabled === false) {
+      for (const agent of this.agents) {
+        if (agent.isSick) {
+          agent.isSick = false
+          agent.ticksSick = 0
+        }
+      }
+    }
   }
 
   // --- Reset with new params ---
