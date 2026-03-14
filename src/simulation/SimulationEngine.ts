@@ -472,6 +472,41 @@ export class SimulationEngine {
     for (const agent of this.agents) {
       agent.age++
 
+      // --- Child mortality from poverty: poor families lose children ---
+      // Real-world: child mortality strongly correlated with household income
+      // Under 5 years: higher risk; 5-17: lower but still present
+      if (agent.state === 'child') {
+        // Find parent(s) by matching homeId among adults
+        const parents = this.agents.filter(a =>
+          a.state !== 'dead' && a.state !== 'child' && a.homeId === agent.homeId
+        )
+        const parentWealth = parents.length > 0
+          ? parents.reduce((s, p) => s + p.wealth, 0) / parents.length
+          : 0
+
+        // Mortality risk: inversely proportional to parent wealth
+        // Orphan (no parents alive) → high risk
+        // Parents with <$0 wealth → ~3% annual mortality (under 5) / ~1% (5-17)
+        // Parents with >$200 → near zero risk
+        if (parentWealth < 100) {
+          const povertyIntensity = Math.max(0, 1 - parentWealth / 100) // 1.0 at $0, 0.0 at $100
+          const baseRisk = agent.age < 5 ? 0.03 : 0.008 // under-5 mortality much higher
+          const orphanBonus = parents.length === 0 ? 0.05 : 0
+          const deathChance = baseRisk * povertyIntensity + orphanBonus
+
+          if (this.rng() < deathChance) {
+            this.killAgent(agent, `Died in childhood (age ${agent.age}) — family poverty`)
+            agent.lifeEvents.push({
+              tick: this.tick,
+              type: 'premature_death',
+              description: `Child died at age ${agent.age} due to poverty (household wealth: $${Math.round(parentWealth)})`,
+            })
+            this.tickPrematureDeaths++
+            continue
+          }
+        }
+      }
+
       // --- Child → Adult transition at age 18 ---
       if (agent.state === 'child' && agent.age >= 18) {
         // Determine education based on school attendance + education mix probability
