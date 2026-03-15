@@ -68,8 +68,9 @@ export const useSimStore = defineStore('v2simulation', () => {
     fullMetricsArchive.value.push(state.metrics)
 
     // Keep chart history bounded (archive stays full for export)
-    if (metricsHistory.value.length > 2000) {
-      metricsHistory.value = metricsHistory.value.slice(-1500)
+    // 6000 ticks ≈ 115 years at 52 ticks/year — covers any realistic simulation
+    if (metricsHistory.value.length > 6000) {
+      metricsHistory.value = metricsHistory.value.slice(-6000)
     }
 
     eventBus.emit('snapshot:updated', state as never)
