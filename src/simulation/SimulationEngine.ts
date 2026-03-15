@@ -2702,7 +2702,7 @@ export class SimulationEngine {
     if (police < targetPolice) {
       const toHire = Math.min(targetPolice - police, 2) // max 2 hires per tick
       const candidates = living.filter(a =>
-        a.state === 'unemployed' && a.age >= 20 && a.age <= 50
+        a.state === 'unemployed' && a.age >= 20 && a.age <= 50 && a.education === 'low'
       )
       for (let i = 0; i < toHire && i < candidates.length; i++) {
         const recruit = candidates[i]
