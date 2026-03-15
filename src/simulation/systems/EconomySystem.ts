@@ -7,9 +7,6 @@ import type { SimulationContext } from '../SimulationContext'
 import { clamp } from '../utils'
 import {
   BANKRUPTCY_THRESHOLD,
-  CAPITAL_RETURN_RATE,
-  CAPITAL_RETURN_THRESHOLD,
-  PASSIVE_LIVING_COST,
 } from '../constants'
 
 // ============================================================
@@ -23,13 +20,13 @@ export function processEconomy(ctx: SimulationContext): void {
 
     // --- Passive living cost (food, transport, utilities) ---
     // Everyone pays this regardless of state — the universal cost of being alive
-    agent.wealth -= PASSIVE_LIVING_COST
+    agent.wealth -= ctx.config.passiveLivingCost
 
     // --- Capital returns (Piketty's r > g) ---
     // Wealthy agents earn passive returns on their capital (interest, dividends, appreciation)
     // This is the primary driver of wealth concentration in the real world
-    if (agent.wealth > CAPITAL_RETURN_THRESHOLD) {
-      const annualReturn = (agent.wealth - CAPITAL_RETURN_THRESHOLD) * CAPITAL_RETURN_RATE
+    if (agent.wealth > ctx.config.capitalReturnThreshold) {
+      const annualReturn = (agent.wealth - ctx.config.capitalReturnThreshold) * ctx.config.capitalReturnRate
       agent.wealth += annualReturn / ctx.params.ticksPerYear
     }
 
@@ -49,6 +46,10 @@ export function processEconomy(ctx: SimulationContext): void {
     } else if (agent.state === 'criminal') {
       // Criminals have low life satisfaction
       agent.satisfaction = clamp(agent.satisfaction - unempDrain * 1.5, 0, 1)
+    } else if (agent.state === 'prisoner') {
+      // Prisoners have very low satisfaction, slowly decaying
+      agent.satisfaction = clamp(agent.satisfaction - unempDrain * 0.5, 0, 1)
+      continue // prisoners don't consume, create businesses, etc.
     }
     if (agent.isSick) {
       agent.satisfaction = clamp(agent.satisfaction - sickDrain, 0, 1)

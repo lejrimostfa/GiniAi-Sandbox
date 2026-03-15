@@ -3,7 +3,7 @@
 // Tabbed charts: Gini, Employment, Wealth, Automation, Satisfaction,
 // Wealth Distribution (bar), Societal Phenomena (line), Cross-Variable (scatter)
 
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, type Ref } from 'vue'
 import { Line, Bar, Scatter } from 'vue-chartjs'
 import { Chart as ChartJS } from 'chart.js'
 import { useSimStore } from '../../stores/v2SimulationStore'
@@ -50,22 +50,109 @@ const giniOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- Employment chart ---
-const empData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: [
-    { label: 'Employed', data: sim.metricsHistory.map((m) => m.employedCount),
-      borderColor: CHART_COLORS.worker, backgroundColor: CHART_COLORS.workerFill, fill: true },
-    { label: 'Unemployed', data: sim.metricsHistory.map((m) => m.unemployedCount),
-      borderColor: CHART_COLORS.precarious, backgroundColor: CHART_COLORS.precariousFill, fill: true },
-    { label: 'Business Owners', data: sim.metricsHistory.map((m) => m.businessOwnerCount),
-      borderColor: 'rgba(155, 114, 170, 1)', backgroundColor: 'rgba(155, 114, 170, 0.15)', fill: true },
-    { label: 'Retired', data: sim.metricsHistory.map((m) => m.retiredCount),
-      borderColor: 'rgba(180, 160, 120, 1)', backgroundColor: 'rgba(180, 160, 120, 0.15)', fill: true, borderDash: [4, 2] },
-    { label: 'Children', data: sim.metricsHistory.map((m) => m.childCount),
-      borderColor: 'rgba(100, 180, 220, 1)', backgroundColor: 'rgba(100, 180, 220, 0.15)', fill: true, borderDash: [3, 2] },
-  ],
-}))
+// ============================================================
+// Rolling average helper (must be defined before buildLineData)
+// ============================================================
+const SMOOTH_WINDOW = 4
+
+function smoothData(raw: number[]): number[] {
+  if (raw.length <= SMOOTH_WINDOW) return raw
+  const out: number[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const start = Math.max(0, i - SMOOTH_WINDOW + 1)
+    let sum = 0
+    for (let j = start; j <= i; j++) sum += raw[j]
+    out.push(sum / (i - start + 1))
+  }
+  return out
+}
+
+// ============================================================
+// Generic series toggle system — reused across all multi-series charts
+// ============================================================
+interface SeriesDef {
+  key: string
+  label: string
+  color: string
+  fill?: string   // explicit fill color (default: transparent)
+  dash?: number[]
+  accessor: (m: SimMetrics) => number
+  smooth?: boolean // apply rolling average
+  yAxisID?: string // for dual-axis charts
+}
+
+// Chart toggle registry: maps chart id → { config, visible ref }
+// This avoids passing Ref objects in the template (Vue auto-unwraps refs)
+interface ChartToggleEntry {
+  config: SeriesDef[]
+  visible: Ref<Set<string>>
+}
+const chartToggles: Record<string, ChartToggleEntry> = {}
+
+function registerChart(id: string, config: SeriesDef[], defaultKeys?: string[]): Ref<Set<string>> {
+  const visible = ref(new Set(defaultKeys ?? config.map(s => s.key))) as Ref<Set<string>>
+  chartToggles[id] = { config, visible }
+  return visible
+}
+
+function onToggleSeries(chartId: string, key: string) {
+  const entry = chartToggles[chartId]
+  if (!entry) return
+  const s = new Set(entry.visible.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  entry.visible.value = s
+}
+
+function onToggleAll(chartId: string) {
+  const entry = chartToggles[chartId]
+  if (!entry) return
+  if (entry.visible.value.size === entry.config.length) {
+    entry.visible.value = new Set()
+  } else {
+    entry.visible.value = new Set(entry.config.map(s => s.key))
+  }
+}
+
+function isAllVisible(chartId: string): boolean {
+  const entry = chartToggles[chartId]
+  if (!entry) return false
+  return entry.visible.value.size === entry.config.length
+}
+
+function buildLineData(
+  config: SeriesDef[],
+  visible: Ref<Set<string>>,
+): ChartData<'line'> {
+  return {
+    labels: labels.value,
+    datasets: config
+      .filter(s => visible.value.has(s.key))
+      .map(s => {
+        const raw = sim.metricsHistory.map(s.accessor)
+        return {
+          label: s.label,
+          data: s.smooth ? smoothData(raw) : raw,
+          borderColor: s.color,
+          backgroundColor: s.fill ?? 'transparent',
+          ...(s.dash ? { borderDash: s.dash } : {}),
+          ...(s.fill ? { fill: true } : {}),
+          ...(s.yAxisID ? { yAxisID: s.yAxisID } : {}),
+        }
+      }),
+  }
+}
+
+// --- Employment series config ---
+const empSeriesConfig: SeriesDef[] = [
+  { key: 'employed', label: 'Employed', color: CHART_COLORS.worker, fill: CHART_COLORS.workerFill, accessor: m => m.employedCount },
+  { key: 'unemployed', label: 'Unemployed', color: CHART_COLORS.precarious, fill: CHART_COLORS.precariousFill, accessor: m => m.unemployedCount },
+  { key: 'businessOwners', label: 'Business Owners', color: 'rgba(155, 114, 170, 1)', fill: 'rgba(155, 114, 170, 0.15)', accessor: m => m.businessOwnerCount },
+  { key: 'retired', label: 'Retired', color: 'rgba(180, 160, 120, 1)', fill: 'rgba(180, 160, 120, 0.15)', dash: [4, 2], accessor: m => m.retiredCount },
+  { key: 'children', label: 'Children', color: 'rgba(100, 180, 220, 1)', fill: 'rgba(100, 180, 220, 0.15)', dash: [3, 2], accessor: m => m.childCount },
+]
+const empVisible = registerChart('employment', empSeriesConfig)
+const empData = computed<ChartData<'line'>>(() => buildLineData(empSeriesConfig, empVisible))
 const empOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Employment Breakdown')
   o.scales!.y = { ...o.scales!.y, min: 0,
@@ -73,16 +160,13 @@ const empOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- Wealth chart ---
-const wealthData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: [
-    { label: 'Median Wealth', data: sim.metricsHistory.map((m) => m.medianWealth),
-      borderColor: CHART_COLORS.gini, backgroundColor: 'transparent' },
-    { label: 'Mean Wealth', data: sim.metricsHistory.map((m) => m.meanWealth),
-      borderColor: CHART_COLORS.redistribution, backgroundColor: 'transparent', borderDash: [4, 3] },
-  ],
-}))
+// --- Wealth series config ---
+const wealthSeriesConfig: SeriesDef[] = [
+  { key: 'median', label: 'Median Wealth', color: CHART_COLORS.gini, accessor: m => m.medianWealth },
+  { key: 'mean', label: 'Mean Wealth', color: CHART_COLORS.redistribution, dash: [4, 3], accessor: m => m.meanWealth },
+]
+const wealthVisible = registerChart('wealth', wealthSeriesConfig)
+const wealthData = computed<ChartData<'line'>>(() => buildLineData(wealthSeriesConfig, wealthVisible))
 const wealthOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Wealth Distribution')
   o.scales!.y = { ...o.scales!.y,
@@ -193,22 +277,16 @@ const ageDistOpts = computed<ChartOptions<'bar'>>(() => ({
   },
 }))
 
-// --- Automation chart (dual-channel: robotic + AI) ---
-const autoData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: [
-    { label: 'Filled Jobs', data: sim.metricsHistory.map((m) => m.filledJobs),
-      borderColor: CHART_COLORS.worker, backgroundColor: CHART_COLORS.workerFill, fill: true },
-    { label: 'Available Slots', data: sim.metricsHistory.map((m) => m.totalJobs),
-      borderColor: CHART_COLORS.textMuted, backgroundColor: 'transparent', borderDash: [4, 4], fill: false },
-    { label: 'Workers Fired (Robotic)', data: sim.metricsHistory.map((m) => m.roboticFiredWorkers),
-      borderColor: CHART_COLORS.stress, backgroundColor: CHART_COLORS.stressFill, fill: true },
-    { label: 'Workers Fired (AI)', data: sim.metricsHistory.map((m) => m.aiFiredWorkers),
-      borderColor: '#B07AE0', backgroundColor: 'rgba(176,122,224,0.15)', fill: true },
-    { label: 'Slots Eliminated (total)', data: sim.metricsHistory.map((m) => m.automatedJobs + m.aiDisplacedJobs),
-      borderColor: '#707080', backgroundColor: 'transparent', borderDash: [2, 3], fill: false },
-  ],
-}))
+// --- Automation series config ---
+const autoSeriesConfig: SeriesDef[] = [
+  { key: 'filledJobs', label: 'Filled Jobs', color: CHART_COLORS.worker, fill: CHART_COLORS.workerFill, accessor: m => m.filledJobs },
+  { key: 'availableSlots', label: 'Available Slots', color: CHART_COLORS.textMuted, dash: [4, 4], accessor: m => m.totalJobs },
+  { key: 'roboticFired', label: 'Workers Fired (Robotic)', color: CHART_COLORS.stress, fill: CHART_COLORS.stressFill, accessor: m => m.roboticFiredWorkers },
+  { key: 'aiFired', label: 'Workers Fired (AI)', color: '#B07AE0', fill: 'rgba(176,122,224,0.15)', accessor: m => m.aiFiredWorkers },
+  { key: 'slotsElim', label: 'Slots Eliminated (total)', color: '#707080', dash: [2, 3], accessor: m => m.automatedJobs + m.aiDisplacedJobs },
+]
+const autoVisible = registerChart('automation', autoSeriesConfig)
+const autoData = computed<ChartData<'line'>>(() => buildLineData(autoSeriesConfig, autoVisible))
 const autoOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Jobs vs Displacement (Robotic + AI)')
   o.scales!.y = { ...o.scales!.y, min: 0,
@@ -216,21 +294,14 @@ const autoOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- GDP chart ---
-const gdpData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: [
-    { label: 'GDP (total output)',
-      data: smoothData(sim.metricsHistory.map(m => m.gdp)),
-      borderColor: '#81B29A', backgroundColor: 'rgba(129,178,154,0.15)', fill: true },
-    { label: 'GDP per Capita',
-      data: smoothData(sim.metricsHistory.map(m => m.gdpPerCapita)),
-      borderColor: '#F2CC8F', backgroundColor: 'transparent', borderDash: [4, 2] },
-    { label: 'Tax Revenue',
-      data: smoothData(sim.metricsHistory.map(m => m.taxRevenue)),
-      borderColor: '#4A90D9', backgroundColor: 'rgba(74,144,217,0.1)', fill: true, borderDash: [3, 2] },
-  ],
-}))
+// --- GDP series config ---
+const gdpSeriesConfig: SeriesDef[] = [
+  { key: 'gdp', label: 'GDP (total output)', color: '#81B29A', fill: 'rgba(129,178,154,0.15)', smooth: true, accessor: m => m.gdp },
+  { key: 'gdpPerCapita', label: 'GDP per Capita', color: '#F2CC8F', dash: [4, 2], smooth: true, accessor: m => m.gdpPerCapita },
+  { key: 'taxRevenue', label: 'Tax Revenue', color: '#4A90D9', fill: 'rgba(74,144,217,0.1)', dash: [3, 2], smooth: true, accessor: m => m.taxRevenue },
+]
+const gdpVisible = registerChart('gdp', gdpSeriesConfig)
+const gdpData = computed<ChartData<'line'>>(() => buildLineData(gdpSeriesConfig, gdpVisible))
 const gdpOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('GDP & Economic Output')
   o.scales!.y = { ...o.scales!.y, min: 0,
@@ -238,39 +309,22 @@ const gdpOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- Government Treasury chart ---
-const govData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: [
-    { label: 'Treasury Balance',
-      data: smoothData(sim.metricsHistory.map(m => m.governmentTreasury)),
-      borderColor: '#4A90D9', backgroundColor: 'rgba(74,144,217,0.15)', fill: true, borderWidth: 2 },
-    { label: 'Tax Revenue (income)',
-      data: smoothData(sim.metricsHistory.map(m => m.taxRevenue)),
-      borderColor: '#81B29A', backgroundColor: 'transparent', borderDash: [4, 2] },
-    { label: 'Pensions',
-      data: smoothData(sim.metricsHistory.map(m => m.govExpPensions)),
-      borderColor: '#F2CC8F', backgroundColor: 'transparent', borderDash: [3, 2] },
-    { label: 'Benefits',
-      data: smoothData(sim.metricsHistory.map(m => m.govExpBenefits)),
-      borderColor: '#E07A5F', backgroundColor: 'transparent', borderDash: [3, 2] },
-    { label: 'Police',
-      data: smoothData(sim.metricsHistory.map(m => m.govExpPolice)),
-      borderColor: '#1565C0', backgroundColor: 'transparent', borderDash: [3, 2] },
-    { label: 'Infrastructure',
-      data: smoothData(sim.metricsHistory.map(m => m.govExpInfra)),
-      borderColor: '#9B72AA', backgroundColor: 'transparent', borderDash: [3, 2] },
-    { label: 'UBI',
-      data: smoothData(sim.metricsHistory.map(m => m.govExpUBI)),
-      borderColor: '#66BB6A', backgroundColor: 'transparent', borderDash: [3, 2] },
-    { label: 'Police Count',
-      data: sim.metricsHistory.map(m => m.policeCount),
-      borderColor: '#1565C0', backgroundColor: 'rgba(21,101,192,0.1)', fill: true, yAxisID: 'y1' },
-    { label: 'Strike Rate (%)',
-      data: sim.metricsHistory.map(m => m.strikeRate * 100),
-      borderColor: '#CC3333', backgroundColor: 'rgba(204,51,51,0.1)', fill: true, yAxisID: 'y1' },
-  ],
-}))
+// --- Government series config ---
+const govSeriesConfig: SeriesDef[] = [
+  { key: 'treasury', label: 'Treasury Balance', color: '#4A90D9', fill: 'rgba(74,144,217,0.15)', smooth: true, accessor: m => m.governmentTreasury },
+  { key: 'taxRevenue', label: 'Tax Revenue (income)', color: '#81B29A', dash: [4, 2], smooth: true, accessor: m => m.taxRevenue },
+  { key: 'pensions', label: 'Pensions', color: '#F2CC8F', dash: [3, 2], smooth: true, accessor: m => m.govExpPensions },
+  { key: 'benefits', label: 'Benefits', color: '#E07A5F', dash: [3, 2], smooth: true, accessor: m => m.govExpBenefits },
+  { key: 'police', label: 'Police', color: '#1565C0', dash: [3, 2], smooth: true, accessor: m => m.govExpPolice },
+  { key: 'infra', label: 'Infrastructure', color: '#9B72AA', dash: [3, 2], smooth: true, accessor: m => m.govExpInfra },
+  { key: 'prison', label: 'Prison', color: '#8B4513', dash: [3, 2], smooth: true, accessor: m => m.govExpPrison },
+  { key: 'hospital', label: 'Hospital', color: '#E53935', dash: [3, 2], smooth: true, accessor: m => m.govExpHospital },
+  { key: 'ubi', label: 'UBI', color: '#66BB6A', dash: [3, 2], smooth: true, accessor: m => m.govExpUBI },
+  { key: 'policeCount', label: 'Police Count', color: '#1565C0', fill: 'rgba(21,101,192,0.1)', yAxisID: 'y1', accessor: m => m.policeCount },
+  { key: 'strikeRate', label: 'Strike Rate (%)', color: '#CC3333', fill: 'rgba(204,51,51,0.1)', yAxisID: 'y1', accessor: m => m.strikeRate * 100 },
+]
+const govVisible = registerChart('government', govSeriesConfig)
+const govData = computed<ChartData<'line'>>(() => buildLineData(govSeriesConfig, govVisible))
 const govOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Government Treasury & Expenses')
   o.scales!.y = { ...o.scales!.y,
@@ -301,18 +355,14 @@ const satOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- Housing chart (Owners vs Mortgage vs Renters) ---
-const housingData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: [
-    { label: 'Owners', data: sim.metricsHistory.map(m => m.homeOwnerCount),
-      borderColor: '#81B29A', backgroundColor: 'rgba(129,178,154,0.15)', fill: true },
-    { label: 'Mortgage', data: sim.metricsHistory.map(m => m.mortgageCount),
-      borderColor: '#F2CC8F', backgroundColor: 'rgba(242,204,143,0.15)', fill: true },
-    { label: 'Renters', data: sim.metricsHistory.map(m => m.renterCount),
-      borderColor: '#E07A5F', backgroundColor: 'rgba(224,122,95,0.15)', fill: true },
-  ],
-}))
+// --- Housing series config ---
+const housingSeriesConfig: SeriesDef[] = [
+  { key: 'owners', label: 'Owners', color: '#81B29A', fill: 'rgba(129,178,154,0.15)', accessor: m => m.homeOwnerCount },
+  { key: 'mortgage', label: 'Mortgage', color: '#F2CC8F', fill: 'rgba(242,204,143,0.15)', accessor: m => m.mortgageCount },
+  { key: 'renters', label: 'Renters', color: '#E07A5F', fill: 'rgba(224,122,95,0.15)', accessor: m => m.renterCount },
+]
+const housingVisible = registerChart('housing', housingSeriesConfig)
+const housingData = computed<ChartData<'line'>>(() => buildLineData(housingSeriesConfig, housingVisible))
 const housingOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Home Ownership vs Renting')
   o.scales!.y = { ...o.scales!.y, min: 0,
@@ -320,85 +370,31 @@ const housingOpts = computed<ChartOptions<'line'>>(() => {
   return o
 })
 
-// --- Societal Phenomena chart (with toggle checkboxes) ---
-interface SocietalSeries {
-  key: string
-  label: string
-  color: string
-  dash?: number[]
-  accessor: (m: SimMetrics) => number
-}
-const societalSeriesConfig: SocietalSeries[] = [
+// --- Societal Phenomena series config (uses generic toggle system) ---
+const societalSeriesConfig: SeriesDef[] = [
   { key: 'births', label: 'Births', color: '#81B29A', accessor: m => m.births },
   { key: 'deaths', label: 'Deaths', color: '#707080', accessor: m => m.deaths },
   { key: 'prematureDeaths', label: 'Premature Deaths', color: '#C44536', accessor: m => m.prematureDeaths },
   { key: 'diseases', label: 'Diseases', color: '#E07A5F', dash: [3, 2], accessor: m => m.diseases },
   { key: 'crimes', label: 'Crimes', color: '#9B72AA', accessor: m => m.crimes },
   { key: 'criminals', label: 'Criminals', color: '#CC3333', dash: [4, 2], accessor: m => m.criminalCount },
+  { key: 'prisoners', label: 'Prisoners', color: '#8B4513', dash: [4, 2], accessor: m => m.prisonerCount },
   { key: 'divorces', label: 'Divorces', color: '#D4A574', dash: [5, 3], accessor: m => m.divorces },
   { key: 'marriages', label: 'Marriages', color: '#F2CC8F', accessor: m => m.marriages },
   { key: 'layoffs', label: 'Layoffs', color: '#E63946', dash: [6, 2], accessor: m => m.layoffs },
   { key: 'unemployed', label: 'Unemployed', color: '#FF8C42', accessor: m => m.unemployedCount },
   { key: 'fertilityRate', label: 'Fertility Rate', color: '#4A90D9', dash: [4, 3], accessor: m => m.fertilityRate },
-  { key: 'taxRevenue', label: 'Tax Revenue', color: '#6BBF59', dash: [2, 2], accessor: m => m.taxRevenue },
-  { key: 'redistribution', label: 'Redistribution', color: '#45B7D1', dash: [2, 2], accessor: m => m.redistributionPaid },
+  { key: 'taxRevenue', label: 'Tax Revenue', color: '#6BBF59', dash: [2, 2], smooth: true, accessor: m => m.taxRevenue },
+  { key: 'redistribution', label: 'Redistribution', color: '#45B7D1', dash: [2, 2], smooth: true, accessor: m => m.redistributionPaid },
   { key: 'satisfaction', label: 'Satisfaction ×100', color: '#FFD700', accessor: m => Math.round(m.meanSatisfaction * 100) },
   { key: 'classTransitions', label: 'Class Transitions', color: '#B8860B', dash: [3, 3], accessor: m => m.classTransitions },
 ]
-
-// Default visible series (most important ones)
-const societalVisible = ref<Set<string>>(new Set([
+// Default visible: most important subset
+const societalVisible = registerChart('societal', societalSeriesConfig, [
   'births', 'deaths', 'prematureDeaths', 'diseases', 'crimes', 'divorces', 'marriages', 'layoffs'
-]))
+])
 
-function toggleSocietalSeries(key: string) {
-  const s = societalVisible.value
-  if (s.has(key)) s.delete(key)
-  else s.add(key)
-  societalVisible.value = new Set(s)
-}
-
-const allSocietalVisible = computed(() => societalVisible.value.size === societalSeriesConfig.length)
-
-function toggleAllSocietal() {
-  if (allSocietalVisible.value) {
-    societalVisible.value = new Set()
-  } else {
-    societalVisible.value = new Set(societalSeriesConfig.map(s => s.key))
-  }
-}
-
-// Rolling average helper to smooth noisy per-tick data (e.g. tax revenue, redistribution)
-const SMOOTH_WINDOW = 4 // 4-tick moving average
-const smoothKeys = new Set(['taxRevenue', 'redistribution'])
-
-function smoothData(raw: number[]): number[] {
-  if (raw.length <= SMOOTH_WINDOW) return raw
-  const out: number[] = []
-  for (let i = 0; i < raw.length; i++) {
-    const start = Math.max(0, i - SMOOTH_WINDOW + 1)
-    let sum = 0
-    for (let j = start; j <= i; j++) sum += raw[j]
-    out.push(sum / (i - start + 1))
-  }
-  return out
-}
-
-const societalData = computed<ChartData<'line'>>(() => ({
-  labels: labels.value,
-  datasets: societalSeriesConfig
-    .filter(s => societalVisible.value.has(s.key))
-    .map(s => {
-      const raw = sim.metricsHistory.map(s.accessor)
-      return {
-        label: s.label,
-        data: smoothKeys.has(s.key) ? smoothData(raw) : raw,
-        borderColor: s.color,
-        backgroundColor: 'transparent',
-        ...(s.dash ? { borderDash: s.dash } : {}),
-      }
-    }),
-}))
+const societalData = computed<ChartData<'line'>>(() => buildLineData(societalSeriesConfig, societalVisible))
 const societalOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Societal Phenomena')
   o.scales!.y = { ...o.scales!.y, min: 0,
@@ -421,6 +417,7 @@ const scatterMetricKeys = [
   { value: 'retiredCount', label: 'Retired' },
   { value: 'childCount', label: 'Children' },
   { value: 'criminalCount', label: 'Criminals' },
+  { value: 'prisonerCount', label: 'Prisoners' },
   // Economy
   { value: 'giniCoefficient', label: 'Gini' },
   { value: 'medianWealth', label: 'Median Wealth' },
@@ -433,6 +430,8 @@ const scatterMetricKeys = [
   { value: 'effectiveTaxRate', label: 'Tax Rate' },
   { value: 'taxRevenue', label: 'Tax Revenue' },
   { value: 'redistributionPaid', label: 'Benefits Paid' },
+  { value: 'govExpHospital', label: 'Hospital Expenses' },
+  { value: 'govExpPrison', label: 'Prison Expenses' },
   // Social
   { value: 'meanSatisfaction', label: 'Satisfaction' },
   { value: 'avgEducationLevel', label: 'Avg Education' },
@@ -583,33 +582,138 @@ watch(activeTab, () => {
       <button class="v2charts__close" @click="emit('close')">&#10005;</button>
     </div>
     <div class="v2charts__body">
+      <!-- Gini (single series, no toggles) -->
       <div v-show="activeTab === 'gini'" class="chart-wrap"><Line ref="giniChart" :data="giniData" :options="giniOpts" /></div>
-      <div v-show="activeTab === 'employment'" class="chart-wrap"><Line ref="empChart" :data="empData" :options="empOpts" /></div>
-      <div v-show="activeTab === 'wealth'" class="chart-wrap"><Line ref="wealthChart" :data="wealthData" :options="wealthOpts" /></div>
-      <div v-show="activeTab === 'wealthDist'" class="chart-wrap"><Bar ref="wealthDistChart" :data="wealthDistData" :options="wealthDistOpts" /></div>
-      <div v-show="activeTab === 'ageDist'" class="chart-wrap"><Bar ref="ageDistChart" :data="ageDistData" :options="ageDistOpts" /></div>
-      <div v-show="activeTab === 'automation'" class="chart-wrap"><Line ref="autoChart" :data="autoData" :options="autoOpts" /></div>
-      <div v-show="activeTab === 'gdp'" class="chart-wrap"><Line ref="gdpChart" :data="gdpData" :options="gdpOpts" /></div>
-      <div v-show="activeTab === 'government'" class="chart-wrap"><Line ref="govChart" :data="govData" :options="govOpts" /></div>
-      <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
-      <div v-show="activeTab === 'societal'" class="chart-wrap chart-wrap--societal">
-        <div class="societal-toggles">
-          <label class="societal-toggle societal-toggle--all">
-            <input type="checkbox" :checked="allSocietalVisible" @change="toggleAllSocietal" />
-            <span class="societal-toggle__label">All</span>
+
+      <!-- Employment (multi-series with toggles) -->
+      <div v-show="activeTab === 'employment'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('employment')" @change="onToggleAll('employment')" />
+            <span class="series-toggle__label">All</span>
           </label>
-          <span class="societal-toggles__sep">|</span>
-          <label v-for="s in societalSeriesConfig" :key="s.key" class="societal-toggle"
-            :style="{ '--series-color': s.color }">
-            <input type="checkbox" :checked="societalVisible.has(s.key)"
-              @change="toggleSocietalSeries(s.key)" />
-            <span class="societal-toggle__dot" :style="{ background: s.color }"></span>
-            <span class="societal-toggle__label">{{ s.label }}</span>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in empSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="empVisible.has(s.key)" @change="onToggleSeries('employment', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="empChart" :data="empData" :options="empOpts" />
+      </div>
+
+      <!-- Wealth (multi-series with toggles) -->
+      <div v-show="activeTab === 'wealth'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('wealth')" @change="onToggleAll('wealth')" />
+            <span class="series-toggle__label">All</span>
+          </label>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in wealthSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="wealthVisible.has(s.key)" @change="onToggleSeries('wealth', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="wealthChart" :data="wealthData" :options="wealthOpts" />
+      </div>
+
+      <!-- Wealth Distribution bar (single dataset, no toggles) -->
+      <div v-show="activeTab === 'wealthDist'" class="chart-wrap"><Bar ref="wealthDistChart" :data="wealthDistData" :options="wealthDistOpts" /></div>
+
+      <!-- Age Distribution bar (single dataset, no toggles) -->
+      <div v-show="activeTab === 'ageDist'" class="chart-wrap"><Bar ref="ageDistChart" :data="ageDistData" :options="ageDistOpts" /></div>
+
+      <!-- Automation (multi-series with toggles) -->
+      <div v-show="activeTab === 'automation'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('automation')" @change="onToggleAll('automation')" />
+            <span class="series-toggle__label">All</span>
+          </label>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in autoSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="autoVisible.has(s.key)" @change="onToggleSeries('automation', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="autoChart" :data="autoData" :options="autoOpts" />
+      </div>
+
+      <!-- GDP (multi-series with toggles) -->
+      <div v-show="activeTab === 'gdp'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('gdp')" @change="onToggleAll('gdp')" />
+            <span class="series-toggle__label">All</span>
+          </label>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in gdpSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="gdpVisible.has(s.key)" @change="onToggleSeries('gdp', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="gdpChart" :data="gdpData" :options="gdpOpts" />
+      </div>
+
+      <!-- Government (multi-series with toggles) -->
+      <div v-show="activeTab === 'government'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('government')" @change="onToggleAll('government')" />
+            <span class="series-toggle__label">All</span>
+          </label>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in govSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="govVisible.has(s.key)" @change="onToggleSeries('government', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="govChart" :data="govData" :options="govOpts" />
+      </div>
+
+      <!-- Satisfaction (single series, no toggles) -->
+      <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
+
+      <!-- Societal (multi-series with toggles) -->
+      <div v-show="activeTab === 'societal'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('societal')" @change="onToggleAll('societal')" />
+            <span class="series-toggle__label">All</span>
+          </label>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in societalSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="societalVisible.has(s.key)" @change="onToggleSeries('societal', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
           </label>
         </div>
         <Line ref="societalChart" :data="societalData" :options="societalOpts" />
       </div>
-      <div v-show="activeTab === 'housing'" class="chart-wrap"><Line ref="housingChart" :data="housingData" :options="housingOpts" /></div>
+
+      <!-- Housing (multi-series with toggles) -->
+      <div v-show="activeTab === 'housing'" class="chart-wrap chart-wrap--toggled">
+        <div class="series-toggles">
+          <label class="series-toggle series-toggle--all">
+            <input type="checkbox" :checked="isAllVisible('housing')" @change="onToggleAll('housing')" />
+            <span class="series-toggle__label">All</span>
+          </label>
+          <span class="series-toggles__sep">|</span>
+          <label v-for="s in housingSeriesConfig" :key="s.key" class="series-toggle" :style="{ '--series-color': s.color }">
+            <input type="checkbox" :checked="housingVisible.has(s.key)" @change="onToggleSeries('housing', s.key)" />
+            <span class="series-toggle__dot" :style="{ background: s.color }"></span>
+            <span class="series-toggle__label">{{ s.label }}</span>
+          </label>
+        </div>
+        <Line ref="housingChart" :data="housingData" :options="housingOpts" />
+      </div>
+
+      <!-- Cross-Variable Scatter -->
       <div v-show="activeTab === 'scatter'" class="chart-wrap chart-wrap--scatter">
         <div class="scatter-controls">
           <label>X: <select v-model="scatterX">
@@ -709,12 +813,12 @@ watch(activeTab, () => {
   }
 }
 
-.chart-wrap--societal {
+.chart-wrap--toggled {
   display: flex;
   flex-direction: column;
 }
 
-.societal-toggles {
+.series-toggles {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 8px;
@@ -723,14 +827,14 @@ watch(activeTab, () => {
   flex-shrink: 0;
 }
 
-.societal-toggles__sep {
+.series-toggles__sep {
   color: $border-color;
   font-size: 10px;
   line-height: 1;
   margin: 0 2px;
 }
 
-.societal-toggle {
+.series-toggle {
   display: flex;
   align-items: center;
   gap: 3px;

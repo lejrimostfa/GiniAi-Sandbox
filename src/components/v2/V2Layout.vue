@@ -6,6 +6,7 @@
 import { ref } from 'vue'
 import SimViewport from './SimViewport.vue'
 import ParamsPanel from './ParamsPanel.vue'
+import AdvancedParamsPanel from './AdvancedParamsPanel.vue'
 import MetricsDashboard from './MetricsDashboard.vue'
 import AgentInspector from './AgentInspector.vue'
 import PlaybackBar from './PlaybackBar.vue'
@@ -14,11 +15,13 @@ import SimLegend from './SimLegend.vue'
 import HeatmapControl from './HeatmapControl.vue'
 import HelpPage from './HelpPage.vue'
 import InfoBubble from './InfoBubble.vue'
+import ScientificQualification from './ScientificQualification.vue'
 import { useSimStore } from '../../stores/v2SimulationStore'
 
 const sim = useSimStore()
 const showCharts = ref(false)
 const showHelp = ref(false)
+const showQualification = ref(false)
 </script>
 
 <template>
@@ -38,6 +41,7 @@ const showHelp = ref(false)
           · Year {{ sim.currentMetrics.year }}
           · Week {{ (sim.currentMetrics.tick % 52) + 1 }}/52
         </span>
+        <button class="topbar-help-btn" @click="showQualification = true" title="Scientific Qualification">🔬</button>
         <button class="topbar-help-btn" @click="showHelp = true" title="Help">📖</button>
       </div>
     </header>
@@ -45,6 +49,7 @@ const showHelp = ref(false)
     <!-- Left: Parameters -->
     <aside class="v2-layout__left">
       <ParamsPanel />
+      <AdvancedParamsPanel />
     </aside>
 
     <!-- Center: Viewport + Charts -->
@@ -79,6 +84,9 @@ const showHelp = ref(false)
 
     <!-- Help Page Modal -->
     <HelpPage v-if="showHelp" @close="showHelp = false" />
+
+    <!-- Scientific Qualification Modal -->
+    <ScientificQualification v-if="showQualification" @close="showQualification = false" />
   </div>
 </template>
 

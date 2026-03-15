@@ -11,6 +11,7 @@ import {
 import {
   createRNG, generateWealthDistribution, uid, resetUidCounter, type RNG,
 } from './utils'
+import { APARTMENT_RENT_RATIO, HOUSE_RENT_RATIO } from './constants'
 
 // ============================================================
 // World sizing — world radius scales with population
@@ -103,7 +104,7 @@ export function generateLocations(params: SimulationParams, seed: number): Locat
   const houseCount = Math.max(4, Math.round(params.populationSize / 25))     // ~8 for 200 pop
   const homePositions = placeLocationsRing(vec2(0, 0), apartmentCount + houseCount, R * 0.7, rng)
   for (let i = 0; i < apartmentCount; i++) {
-    const value = 400 + Math.round(rng() * 300) // apartment unit value $400-$700
+    const value = 500 + Math.round(rng() * 400) // apartment building value $500-$900 (costs more to build)
     locations.push({
       id: uid('home'),
       type: 'home',
@@ -112,8 +113,8 @@ export function generateLocations(params: SimulationParams, seed: number): Locat
       jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
       housingType: 'apartment',
       housingValue: value,
-      rent: Math.round(value * 0.06),          // annual rent ≈ 6% of value
-      maxResidents: 5,                          // apartment building: 5 families
+      rent: Math.round(value * APARTMENT_RENT_RATIO), // cheaper per family, but 5 families → more total rent
+      maxResidents: 5,                                // apartment building: 5 families
       residentsCount: 0,
     })
   }
@@ -127,8 +128,8 @@ export function generateLocations(params: SimulationParams, seed: number): Locat
       jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
       housingType: 'house',
       housingValue: value,
-      rent: Math.round(value * 0.05),           // annual rent ≈ 5% of value
-      maxResidents: 2,                           // small house: 1-2 families
+      rent: Math.round(value * HOUSE_RENT_RATIO), // standard rent for houses
+      maxResidents: 2,                             // small house: 1-2 families
       residentsCount: 0,
     })
   }
@@ -149,6 +150,33 @@ export function generateLocations(params: SimulationParams, seed: number): Locat
     type: 'government',
     position: vec2(0, 0),
     radius: 3.5,
+    jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
+  })
+
+  // --- Prison (1, near government) ---
+  locations.push({
+    id: uid('prison'),
+    type: 'prison',
+    position: vec2(6, -5),
+    radius: 2.5,
+    jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
+  })
+
+  // --- Hospital (1, near government) ---
+  locations.push({
+    id: uid('hospital'),
+    type: 'hospital',
+    position: vec2(-6, -5),
+    radius: 3.5,
+    jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
+  })
+
+  // --- Amusement Park (1, on the outskirts) ---
+  locations.push({
+    id: uid('park'),
+    type: 'amusement_park',
+    position: vec2(R * 0.4, R * 0.3),
+    radius: 4,
     jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
   })
 
@@ -293,6 +321,9 @@ export function generateAgents(
       ticksSick: 0,
       ticksLowSatisfaction: 0,
       ticksAsCriminal: 0,
+      crimeAttemptCooldown: 0,
+      ticksInPrison: 0,
+      prisonSentence: 0,
       deathTick: null,
       carryingResource: false,
       lastPaidTick: -10,

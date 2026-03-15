@@ -8,14 +8,8 @@
 import type { SimulationContext } from '../SimulationContext'
 import { clamp } from '../utils'
 import {
-  CRIME_UNEMPLOYMENT_TICKS,
-  CRIME_WEALTH_THRESHOLD,
-  CRIME_SATISFACTION_THRESHOLD,
-  DISEASE_POVERTY_TICKS,
-  DISEASE_WEALTH_THRESHOLD,
   DIVORCE_LOW_SAT_TICKS,
   DIVORCE_SAT_THRESHOLD,
-  DEATH_SICK_TICKS,
 } from '../constants'
 
 // ============================================================
@@ -26,7 +20,10 @@ export function processCausalPhenomena(ctx: SimulationContext): void {
   if (N === 0) return
 
   for (const agent of ctx.agents) {
-    if (agent.state === 'dead' || agent.state === 'child') continue
+    if (agent.state === 'dead' || agent.state === 'child' || agent.state === 'prisoner') continue
+
+    // --- Decrement crime attempt cooldown ---
+    if (agent.crimeAttemptCooldown > 0) agent.crimeAttemptCooldown--
 
     // --- Track satisfaction trend ---
     if (agent.satisfaction < DIVORCE_SAT_THRESHOLD) {
@@ -39,10 +36,10 @@ export function processCausalPhenomena(ctx: SimulationContext): void {
     // Causal chain: poor for many ticks → body breaks down → sick
     // NOTE: Disease can also SPREAD by proximity (see processProximityInteractions)
     if (!agent.isSick && ctx.params.diseasesEnabled) {
-      const inPoverty = agent.wealth < DISEASE_WEALTH_THRESHOLD
+      const inPoverty = agent.wealth < ctx.config.diseaseWealthThreshold
       const lowSat = agent.satisfaction < 0.35
-      if (inPoverty && lowSat && agent.ticksLowSatisfaction >= DISEASE_POVERTY_TICKS) {
-        const povertyDuration = agent.ticksLowSatisfaction - DISEASE_POVERTY_TICKS
+      if (inPoverty && lowSat && agent.ticksLowSatisfaction >= ctx.config.diseasePovertyTicks) {
+        const povertyDuration = agent.ticksLowSatisfaction - ctx.config.diseasePovertyTicks
         if (ctx.rng() < 0.05 + povertyDuration * 0.02) {
           agent.isSick = true
           agent.ticksSick = 0
@@ -55,18 +52,18 @@ export function processCausalPhenomena(ctx: SimulationContext): void {
       // Already sick — track duration, satisfaction decays
       agent.ticksSick++
       agent.satisfaction = clamp(agent.satisfaction - 0.03, 0, 1)
-      // NOTE: Recovery now requires visiting market/government (see agentInteract)
-      // Only wealthy agents who visit healthcare locations can recover
+      // NOTE: Recovery requires visiting hospital (see agentInteract → hospital interaction)
+      // Hospital provides HOSPITAL_RECOVERY_PROB chance of cure per visit, government pays treatment cost
     }
 
     // --- PROLONGED UNEMPLOYMENT: multiple possible outcomes ---
     // Not everyone turns to crime — diversified paths based on agent profile
-    if (agent.state === 'unemployed' && agent.ticksUnemployed >= CRIME_UNEMPLOYMENT_TICKS) {
-      const desperate = agent.wealth < CRIME_WEALTH_THRESHOLD
-        && agent.satisfaction < CRIME_SATISFACTION_THRESHOLD
+    if (agent.state === 'unemployed' && agent.ticksUnemployed >= ctx.config.crimeUnemploymentTicks) {
+      const desperate = agent.wealth < ctx.config.crimeWealthThreshold
+        && agent.satisfaction < ctx.config.crimeSatisfactionThreshold
 
       if (desperate) {
-        const desperation = (agent.ticksUnemployed - CRIME_UNEMPLOYMENT_TICKS) * 0.02
+        const desperation = (agent.ticksUnemployed - ctx.config.crimeUnemploymentTicks) * 0.02
         const roll = ctx.rng()
 
         if (roll < 0.03 + desperation * 0.4) {
@@ -117,7 +114,7 @@ export function processCausalPhenomena(ctx: SimulationContext): void {
     }
 
     // --- PREMATURE DEATH: caused by prolonged sickness + poverty + age ---
-    if (ctx.params.diseasesEnabled && agent.isSick && agent.ticksSick >= DEATH_SICK_TICKS) {
+    if (ctx.params.diseasesEnabled && agent.isSick && agent.ticksSick >= ctx.config.deathSickTicks) {
       const ageFactor = agent.age > 50 ? 0.03 : 0.005
       const wealthFactor = agent.wealth < 0 ? 0.04 : 0.01
       if (ctx.rng() < ageFactor + wealthFactor) {

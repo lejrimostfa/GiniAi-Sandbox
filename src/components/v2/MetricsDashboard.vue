@@ -81,9 +81,23 @@ function fmtMoney(v: number | undefined): string {
       </div>
 
       <div class="metric-card">
-        <span class="metric-card__label">👮 Police</span>
+        <span class="metric-card__label">� Prisoners</span>
+        <span class="metric-card__value" style="color: #8B4513">
+          {{ m.prisonerCount }}
+        </span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-card__label">� Police</span>
         <span class="metric-card__value" style="color: #1565C0">
           {{ m.policeCount }}
+        </span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-card__label">🏥 Hospital</span>
+        <span class="metric-card__value" style="color: #E53935">
+          {{ fmtMoney(m.govExpHospital) }}
         </span>
       </div>
 

@@ -21,7 +21,7 @@ import { arrestCriminal } from './GovernmentSystem'
 // Main proximity processing — called once per tick
 // ============================================================
 export function processProximityInteractions(ctx: SimulationContext): void {
-  const living = ctx.agents.filter((a) => a.state !== 'dead')
+  const living = ctx.agents.filter((a) => a.state !== 'dead' && a.state !== 'prisoner')
   const N = living.length
   if (N < 2) return
 
@@ -119,9 +119,9 @@ export function processProximityInteractions(ctx: SimulationContext): void {
         const female = a.gender === 'female' ? a : b
         const male = a.gender === 'male' ? a : b
 
-        // Female education penalty: high-edu women are more independent → less likely to couple
-        // low=0%, medium=15%, high=35% reduction
-        const femEduScore = female.education === 'high' ? 0.35 : female.education === 'medium' ? 0.15 : 0
+        // Female education penalty: high-edu women are more independent → much less likely to couple
+        // low=0%, medium=20%, high=55% reduction
+        const femEduScore = female.education === 'high' ? 0.55 : female.education === 'medium' ? 0.20 : 0
         const femEduFactor = 1 - femEduScore
 
         // Male wealth penalty: poor men struggle to attract partners
@@ -194,9 +194,33 @@ export function processProximityInteractions(ctx: SimulationContext): void {
 
 // ============================================================
 // Helper: attempt robbery (criminal → victim, must be in proximity)
+// Sporadic: criminals have a cooldown between attempts.
+// Police presence reduces success probability.
 // ============================================================
 function attemptRobbery(ctx: SimulationContext, criminal: Agent, victim: Agent): void {
-  if (ctx.rng() > 0.5) return // not every encounter is a robbery
+  // Cooldown: criminal can't attempt crime every tick
+  if (criminal.crimeAttemptCooldown > 0) return
+
+  // Set cooldown regardless of outcome (attempt was made)
+  criminal.crimeAttemptCooldown = ctx.config.crimeAttemptCooldown
+
+  // Compute success probability — base rate reduced by nearby police
+  let successProb = ctx.config.crimeSuccessBaseProb
+  const policeNearby = ctx.agents.filter(
+    a => a.state === 'police' && vec2Distance(a.position, criminal.position) < ctx.config.policeDeterrentRadius
+  )
+  for (let p = 0; p < policeNearby.length; p++) {
+    successProb *= ctx.config.policeDeterrentFactor // each nearby police multiplies by 0.4
+  }
+
+  if (ctx.rng() > successProb) {
+    // Crime attempt failed
+    criminal.lifeEvents.push({
+      tick: ctx.tick, type: 'crime_failed',
+      description: `Robbery attempt failed${policeNearby.length > 0 ? ` (${policeNearby.length} police nearby)` : ''}`,
+    })
+    return
+  }
 
   ctx.tickCrimes++
   const stolen = Math.min(victim.wealth * 0.08, 80)

@@ -71,6 +71,7 @@ const stateColor = computed(() => {
   if (s === 'retired') return '#707080'
   if (s === 'police') return '#1565C0'
   if (s === 'criminal') return '#CC3333'
+  if (s === 'prisoner') return '#8B4513'
   return '#888'
 })
 
@@ -83,6 +84,7 @@ const stateLabel = computed(() => {
   if (s === 'retired') return 'Retired'
   if (s === 'child') return 'Child'
   if (s === 'criminal') return 'Criminal'
+  if (s === 'prisoner') return 'Prisoner'
   if (s === 'police') return 'Police'
   if (s === 'dead') return 'Dead'
   return '—'

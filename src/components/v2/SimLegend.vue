@@ -30,6 +30,10 @@ const showEvents = ref(false)
         <div class="legend__item"><span class="legend__emoji">🌳</span><span>Resource</span></div>
         <div class="legend__item"><span class="legend__emoji">🏭</span><span>Factory</span></div>
         <div class="legend__item"><span class="legend__emoji">🏦</span><span>Bank</span></div>
+        <div class="legend__item"><span class="legend__emoji">🚔</span><span>Police Station</span></div>
+        <div class="legend__item"><span class="legend__emoji">⛓️</span><span>Prison</span></div>
+        <div class="legend__item"><span class="legend__emoji">🏥</span><span>Hospital</span></div>
+        <div class="legend__item"><span class="legend__emoji">🎡</span><span>Amusement Park</span></div>
       </div>
     </div>
 
@@ -54,6 +58,7 @@ const showEvents = ref(false)
         <div class="legend__item"><span class="legend__emoji">👴</span><span>Retired (♂)</span></div>
         <div class="legend__item"><span class="legend__emoji">👵</span><span>Retired (♀)</span></div>
         <div class="legend__item"><span class="legend__emoji">🥷</span><span>Criminal</span></div>
+        <div class="legend__item"><span class="legend__emoji">🔒</span><span>Prisoner</span></div>
         <div class="legend__item"><span class="legend__emoji">�</span><span>Police</span></div>
         <div class="legend__item"><span class="legend__emoji">✊</span><span>On Strike</span></div>
         <div class="legend__item"><span class="legend__emoji">�👦</span><span>Child (♂)</span></div>

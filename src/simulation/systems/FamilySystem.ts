@@ -9,11 +9,6 @@ import type { SimulationContext } from '../SimulationContext'
 import { clamp, uid } from '../utils'
 import {
   POOR_COUPLE_WEALTH_THRESHOLD,
-  POOR_SAT_THRESHOLD,
-  NORMAL_SAT_THRESHOLD,
-  POOR_MAX_CHILDREN,
-  NORMAL_MAX_CHILDREN,
-  POVERTY_FERTILITY_BOOST_MAX,
 } from '../constants'
 
 // ============================================================
@@ -46,33 +41,35 @@ export function processFamily(ctx: SimulationContext): void {
     const coupleWealth = agent.wealth + partner.wealth
     const isPoor = coupleWealth < POOR_COUPLE_WEALTH_THRESHOLD
     // Poor couples have children even when unhappy (lower satisfaction threshold)
-    const satThreshold = isPoor ? POOR_SAT_THRESHOLD : NORMAL_SAT_THRESHOLD
+    const satThreshold = isPoor ? ctx.config.poorSatThreshold : ctx.config.normalSatThreshold
     const bothSatisfied = agent.satisfaction > satThreshold && partner.satisfaction > satThreshold
     const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
       || (partner.state === 'employed' || partner.state === 'business_owner' || partner.state === 'police')
     // Poor/unemployed couples can also have children (no employment requirement)
     const canHaveChild = atLeastOneEmployed || isPoor
     const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
-    const notTooManyKids = isPoor ? agent.children < POOR_MAX_CHILDREN : agent.children < NORMAL_MAX_CHILDREN
+    const notTooManyKids = isPoor ? agent.children < ctx.config.poorMaxChildren : agent.children < ctx.config.normalMaxChildren
 
     // --- Conception failure: probability increases with age, satisfaction, education, wealth ---
-    // Real-world demographic transition: richer, more educated, happier people have fewer children
+    // Real-world demographic transition: richer, more educated women have fewer children
     // Age factor: fertility peaks at 25, drops sharply after 35
     const avgAge = (agent.age + partner.age) / 2
     const agePenalty = avgAge > 35 ? (avgAge - 35) * 0.04 : 0 // +4% failure per year over 35
 
-    // Education factor: high-edu couples have fewer children (demographic transition)
-    const eduScore = (e: string) => e === 'high' ? 0.9 : e === 'medium' ? 0.5 : 0.2
-    const coupleEdu = (eduScore(agent.education) + eduScore(partner.education)) / 2
-    const eduPenalty = coupleEdu * 0.35 // high-edu couple: +31% failure
+    // Education factor: WOMAN's education is the dominant driver of fertility reduction
+    // Highly educated women delay/reduce childbearing (career focus, family planning)
+    const female = agent.gender === 'female' ? agent : partner
+    const femEduScore = female.education === 'high' ? 1.0 : female.education === 'medium' ? 0.4 : 0.1
+    const maleEduScore = (female === agent ? partner : agent).education === 'high' ? 0.3 : 0.1
+    const eduPenalty = (femEduScore * 0.45) + (maleEduScore * 0.10) // high-edu woman: +45% failure; man adds minor +3%
 
-    // Wealth factor: wealthier couples delay/avoid children, poor couples have MORE
-    const wealthPenalty = coupleWealth > 200
-      ? Math.min(0.3, (coupleWealth - 200) * 0.001) // rich: up to +30% failure
+    // Wealth factor: wealthy couples delay/avoid children much more (career, lifestyle)
+    const wealthPenalty = coupleWealth > 150
+      ? Math.min(0.40, (coupleWealth - 150) * 0.002) // rich: up to +40% failure (steeper curve)
       : 0
     // Poverty fertility boost: very poor couples have significantly higher birth rate
     const povertyBoost = coupleWealth < POOR_COUPLE_WEALTH_THRESHOLD
-      ? Math.min(POVERTY_FERTILITY_BOOST_MAX, (POOR_COUPLE_WEALTH_THRESHOLD - coupleWealth) * 0.007) // poor: up to -40% failure (= more births)
+      ? Math.min(ctx.config.povertyFertilityBoostMax, (POOR_COUPLE_WEALTH_THRESHOLD - coupleWealth) * 0.007) // poor: up to -40% failure (= more births)
       : 0
 
     // Satisfaction factor: very happy people are more career-focused, less urgency for kids
@@ -86,6 +83,25 @@ export function processFamily(ctx: SimulationContext): void {
     const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure))
 
     if (bothSatisfied && canHaveChild && fertileAge && notTooManyKids && ctx.rng() < adjustedBirthProb) {
+      // --- Hospital check: births are safer with a hospital ---
+      const hasHospital = ctx.locations.some((l) => l.type === 'hospital')
+
+      // Without hospital: risk of infant mortality (birth complications)
+      if (!hasHospital && ctx.rng() < ctx.config.hospitalBirthMortalityNoHospital) {
+        agent.lifeEvents.push({ tick: ctx.tick, type: 'birth_no_hospital', description: 'Birth complications — no hospital available' })
+        partner.lifeEvents.push({ tick: ctx.tick, type: 'birth_no_hospital', description: 'Birth complications — no hospital available' })
+        agent.satisfaction = clamp(agent.satisfaction - 0.20, 0, 1)
+        partner.satisfaction = clamp(partner.satisfaction - 0.20, 0, 1)
+        continue
+      }
+
+      // Hospital exists: government pays birth cost
+      if (hasHospital) {
+        ctx.governmentTreasury -= ctx.config.hospitalBirthCost
+        ctx.tickGovExpHospital += ctx.config.hospitalBirthCost
+        agent.lifeEvents.push({ tick: ctx.tick, type: 'birth_hospital', description: `Baby delivered at hospital (gov paid $${ctx.config.hospitalBirthCost})` })
+      }
+
       agent.children++
       partner.children = agent.children // sync count
 
@@ -126,6 +142,9 @@ export function processFamily(ctx: SimulationContext): void {
         ticksSick: 0,
         ticksLowSatisfaction: 0,
         ticksAsCriminal: 0,
+        crimeAttemptCooldown: 0,
+        ticksInPrison: 0,
+        prisonSentence: 0,
         deathTick: null,
         carryingResource: false,
         lastPaidTick: -10,

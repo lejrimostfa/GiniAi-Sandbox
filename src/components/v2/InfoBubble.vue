@@ -74,6 +74,24 @@ const LOCATION_INFO: Record<LocationType, { icon: string; title: string; descrip
     description: 'Government-funded law enforcement. Police officers patrol the city to arrest criminals and maintain order.',
     impact: 'Reduces crime rate by arresting criminals. Funded by government treasury — more police are hired during social unrest. Confiscated wealth returns to the treasury.',
   },
+  prison: {
+    icon: '⛓️',
+    title: 'Prison',
+    description: 'Criminals arrested by police are sent here to serve their sentence. Prisoners cannot work or consume during incarceration.',
+    impact: 'Removes criminals from the streets, reducing crime rate. Costs the government per prisoner per tick. Prisoners are released after their sentence and re-enter the labor market as unemployed.',
+  },
+  hospital: {
+    icon: '🏥',
+    title: 'Hospital',
+    description: 'Sick agents come here for treatment. Recovery depends on wealth and time spent ill.',
+    impact: 'Funded by government health expenditure. Treats disease and reduces premature death risk. Agents with low wealth may not recover without adequate healthcare.',
+  },
+  amusement_park: {
+    icon: '🎡',
+    title: 'Amusement Park',
+    description: 'Leisure destination where agents go to boost their satisfaction. Visiting costs a small fee.',
+    impact: 'Increases agent satisfaction, which reduces crime risk and improves social stability. More affluent agents visit more frequently.',
+  },
 }
 
 const WORKPLACE_INFO: Record<WorkplaceType, { label: string; detail: string }> = {
@@ -130,6 +148,39 @@ const stats = computed(() => {
   }
   if (loc.educationCost != null) {
     items.push({ label: 'Training Cost', value: `$${loc.educationCost}` })
+  }
+  // Prison stats
+  if (loc.type === 'prison' && sim.currentMetrics) {
+    items.push({ label: 'Prisoners', value: `${sim.currentMetrics.prisonerCount}` })
+    items.push({ label: 'Cost/tick', value: `$${sim.currentMetrics.govExpPrison.toFixed(0)}` })
+  }
+  // Hospital stats
+  if (loc.type === 'hospital' && sim.currentMetrics) {
+    items.push({ label: 'Sick Agents', value: `${sim.currentMetrics.diseases}` })
+    items.push({ label: 'Cost/tick', value: `$${sim.currentMetrics.govExpHospital.toFixed(0)}` })
+  }
+  // Police station stats
+  if (loc.type === 'police_station' && sim.currentMetrics) {
+    items.push({ label: 'Police Officers', value: `${sim.currentMetrics.policeCount}` })
+    items.push({ label: 'Criminals', value: `${sim.currentMetrics.criminalCount}` })
+    items.push({ label: 'Cost/tick', value: `$${sim.currentMetrics.govExpPolice.toFixed(0)}` })
+  }
+  // Government stats
+  if (loc.type === 'government' && sim.currentMetrics) {
+    items.push({ label: 'Treasury', value: `$${sim.currentMetrics.governmentTreasury.toFixed(0)}` })
+    items.push({ label: 'Tax Revenue', value: `$${sim.currentMetrics.taxRevenue.toFixed(0)}` })
+    items.push({ label: 'Redistribution', value: `$${sim.currentMetrics.redistributionPaid.toFixed(0)}` })
+  }
+  // Amusement park stats
+  if (loc.type === 'amusement_park' && sim.currentMetrics) {
+    items.push({ label: 'Entry Cost', value: `$${sim.params.behaviorConfig.amusementParkEntryCost ?? 8}` })
+    items.push({ label: 'Avg Satisfaction', value: `${(sim.currentMetrics.meanSatisfaction * 100).toFixed(0)}%` })
+  }
+  // Home stats
+  if (loc.type === 'home') {
+    if (loc.housingType) items.push({ label: 'Type', value: loc.housingType === 'apartment' ? 'Apartment' : 'House' })
+    if (loc.rent != null) items.push({ label: 'Rent', value: `$${loc.rent.toFixed(0)}/yr` })
+    if (loc.residentsCount != null && loc.maxResidents != null) items.push({ label: 'Residents', value: `${loc.residentsCount} / ${loc.maxResidents}` })
   }
   return items
 })

@@ -5,11 +5,11 @@
 
 import type {
   Agent, Location, SimulationParams, SimMetrics, WorldState,
-  Education, WorkplaceType, MoneyEvent,
+  Education, WorkplaceType, MoneyEvent, BehaviorConfig,
 } from './types'
 import {
   vec2, vec2Sub, vec2Add, vec2Scale, vec2Normalize, vec2Distance, vec2Length,
-  WORKPLACE_CONFIGS, EDUCATION_SKILL_MAP,
+  WORKPLACE_CONFIGS, EDUCATION_SKILL_MAP, DEFAULT_BEHAVIOR_CONFIG,
 } from './types'
 import {
   createRNG, computeGiniFast, clamp, median, uid, type RNG,
@@ -24,6 +24,12 @@ import { processFamily as familyProcessFamily } from './systems/FamilySystem'
 import { processCausalPhenomena as causalProcess } from './systems/CausalPhenomenaSystem'
 import { processProximityInteractions as proximityProcess } from './systems/ProximitySystem'
 import { runAutomation as autoRunAutomation, processLayoffs as autoProcessLayoffs, processJobMarket as autoProcessJobMarket } from './systems/AutomationSystem'
+import {
+  IMMIGRATION_BASE_RATE, EMIGRATION_BASE_RATE,
+  EMIGRATION_LOW_SAT_THRESHOLD, EMIGRATION_UNEMPLOYED_BOOST,
+  IMMIGRANT_SKILLED_HIRE_RATE, IMMIGRANT_INITIAL_WEALTH,
+  IMMIGRANT_AGE_MIN, IMMIGRANT_AGE_MAX,
+} from './constants'
 
 // ============================================================
 // Engine configuration constants
@@ -59,6 +65,11 @@ export class SimulationEngine {
   metrics: SimMetrics = this.emptyMetrics()
   moneyEvents: MoneyEvent[] = []  // recent money gain/loss events for floating indicators
 
+  // --- Merged behavior config (defaults + user overrides) ---
+  private get cfg(): BehaviorConfig {
+    return { ...DEFAULT_BEHAVIOR_CONFIG, ...this.params.behaviorConfig }
+  }
+
   // --- Societal counters (reset each tick, accumulated for metrics) ---
   private tickBirths = 0
   private tickDeaths = 0
@@ -80,6 +91,8 @@ export class SimulationEngine {
   private tickGovExpInfra = 0
   private tickGovExpBenefits = 0
   private tickGovExpPolice = 0
+  private tickGovExpPrison = 0
+  private tickGovExpHospital = 0
   private tickGovExpUBI = 0
 
   // --- Rolling window buffers for smooth rate computation ---
@@ -173,10 +186,13 @@ export class SimulationEngine {
   // --- Build context object for extracted systems ---
   // Systems receive this context instead of accessing engine internals directly
   private buildContext(): SimulationContext {
+    // Merge default behavior config with user overrides
+    const config: BehaviorConfig = { ...DEFAULT_BEHAVIOR_CONFIG, ...this.params.behaviorConfig }
     return {
       agents: this.agents,
       locations: this.locations,
       params: this.params,
+      config,
       tick: this.tick,
       rng: this.rng,
       tickBirths: this.tickBirths,
@@ -196,6 +212,8 @@ export class SimulationEngine {
       tickGovExpInfra: this.tickGovExpInfra,
       tickGovExpBenefits: this.tickGovExpBenefits,
       tickGovExpPolice: this.tickGovExpPolice,
+      tickGovExpPrison: this.tickGovExpPrison,
+      tickGovExpHospital: this.tickGovExpHospital,
       tickGovExpUBI: this.tickGovExpUBI,
       cumulativeAutomatedJobs: this.cumulativeAutomatedJobs,
       cumulativeAiDisplacedJobs: this.cumulativeAiDisplacedJobs,
@@ -235,6 +253,8 @@ export class SimulationEngine {
     this.tickGovExpInfra = ctx.tickGovExpInfra
     this.tickGovExpBenefits = ctx.tickGovExpBenefits
     this.tickGovExpPolice = ctx.tickGovExpPolice
+    this.tickGovExpPrison = ctx.tickGovExpPrison
+    this.tickGovExpHospital = ctx.tickGovExpHospital
     this.tickGovExpUBI = ctx.tickGovExpUBI
     this.moneyEvents = ctx.moneyEvents
     // Sync cumulative automation counters (incremented by runAutomation)
@@ -273,6 +293,8 @@ export class SimulationEngine {
     this.tickGovExpInfra = 0
     this.tickGovExpBenefits = 0
     this.tickGovExpPolice = 0
+    this.tickGovExpPrison = 0
+    this.tickGovExpHospital = 0
     this.tickGovExpUBI = 0
 
     // Reset per-tick earnings and increment unemployment counters
@@ -314,7 +336,7 @@ export class SimulationEngine {
 
     // 4. Agent decisions
     for (const agent of this.agents) {
-      if (agent.state === 'dead') continue
+      if (agent.state === 'dead' || agent.state === 'prisoner') continue
       this.agentDecide(agent)
     }
 
@@ -323,7 +345,7 @@ export class SimulationEngine {
 
     // 6. Interactions (at locations)
     for (const agent of this.agents) {
-      if (agent.state === 'dead') continue
+      if (agent.state === 'dead' || agent.state === 'prisoner') continue
       this.agentInteract(agent)
     }
 
@@ -703,25 +725,95 @@ export class SimulationEngine {
       this.tickDeaths += toRemove.length
     }
 
-    // --- Immigration: add agents if below target population (controlled by immigrationRate param) ---
-    // immigrationRate=0 → no immigration, population shrinks naturally
-    // immigrationRate=1 → up to 2 immigrants/tick (full replacement)
-    if (this.params.immigrationRate <= 0) return
-    const deficit = this.params.populationSize - this.agents.length
-    if (deficit <= 0) return
-    const maxPerTick = Math.max(1, Math.round(2 * this.params.immigrationRate))
-    const toAdd = Math.min(deficit, maxPerTick)
+    // --- Immigration & emigration only active if user enabled it ---
+    if (!this.params.immigrationEnabled) return
 
-    for (let i = 0; i < toAdd; i++) {
-      // At low immigration rates, each immigrant has a chance of being skipped
-      if (this.rng() > this.params.immigrationRate) continue
+    // --- Emigration: dissatisfied/unemployed agents may leave ---
+    // Scales inversely with immigrationRate (open economy retains people)
+    const emigrationScale = 1 - this.params.immigrationRate  // 0 at rate=1, 1 at rate=0
+    if (emigrationScale > 0) {
+      const toEmigrate: string[] = []
+      for (const agent of this.agents) {
+        if (agent.state === 'dead' || agent.state === 'child' || agent.state === 'retired' || agent.state === 'prisoner') continue
+        let emigProb = EMIGRATION_BASE_RATE * emigrationScale
+        if (agent.satisfaction < EMIGRATION_LOW_SAT_THRESHOLD) emigProb *= 2
+        if (agent.state === 'unemployed') emigProb += EMIGRATION_UNEMPLOYED_BOOST * emigrationScale
+        if (this.rng() < emigProb) {
+          toEmigrate.push(agent.id)
+          if (agent.workplaceId) {
+            const wp = this.locations.find((l) => l.id === agent.workplaceId)
+            if (wp) wp.filledSlots = Math.max(0, wp.filledSlots - 1)
+          }
+        }
+      }
+      if (toEmigrate.length > 0) {
+        this.agents = this.agents.filter((a) => !toEmigrate.includes(a.id))
+        this.tickDeaths += toEmigrate.length
+      }
+    }
+
+    // --- Immigration: slot-based ---
+    // Immigrants come ONLY if there are vacant job slots.
+    // If NO vacant slots → only 10% arrive as clandestine (unemployed, no wealth).
+    if (this.params.immigrationRate <= 0) return
+
+    const vacantWorkplaces = this.locations.filter(
+      (l) => l.type === 'workplace' && l.filledSlots < l.jobSlots
+    )
+    const totalVacantSlots = vacantWorkplaces.reduce(
+      (s, wp) => s + (wp.jobSlots - wp.filledSlots), 0
+    )
+    const hasVacancy = totalVacantSlots > 0
+
+    // How many immigrants want to come this tick
+    const deficit = this.params.populationSize - this.agents.length
+    const maxPerTick = Math.max(1, Math.round(2 * this.params.immigrationRate))
+    const wantToAdd = deficit > 0 ? Math.min(deficit, maxPerTick) : 0
+    // Proactive: a trickle independent of deficit
+    const proactiveProb = IMMIGRATION_BASE_RATE * this.params.immigrationRate
+    const hasProactive = this.rng() < proactiveProb
+    const totalWant = wantToAdd + (hasProactive ? 1 : 0)
+    if (totalWant <= 0) return
+
+    for (let i = 0; i < totalWant; i++) {
+      // Per-immigrant probability filter for deficit-based slots
+      if (i < wantToAdd && this.rng() > this.params.immigrationRate) continue
+
+      // If no vacant slots → only 10% get through as clandestine
+      const isClandestine = !hasVacancy && this.rng() > 0.10
+      if (isClandestine) continue // 90% turned away when no jobs
+
       const home = homes[Math.floor(this.rng() * homes.length)]
       const gender = this.rng() < 0.5 ? 'male' as const : 'female' as const
-
       const eduRoll = this.rng()
       const education: Education = eduRoll < this.params.educationMix.low ? 'low'
         : eduRoll < this.params.educationMix.low + this.params.educationMix.medium ? 'medium'
         : 'high'
+
+      // Skilled migration: if there ARE vacancies, try to match immigrant to a job
+      let arrivedEmployed = false
+      let matchedWp: Location | null = null
+
+      if (hasVacancy) {
+        const skilledHireProb = IMMIGRANT_SKILLED_HIRE_RATE[education] ?? 0.3
+        if (this.rng() < skilledHireProb) {
+          const matching = vacantWorkplaces.filter((wp) => {
+            if (wp.filledSlots >= wp.jobSlots) return false
+            const req = WORKPLACE_CONFIGS[wp.workplaceType!].requiredEducation
+            const skillReq = EDUCATION_SKILL_MAP[req]
+            const agentSkill = EDUCATION_SKILL_MAP[education]
+            return agentSkill >= skillReq * 0.7
+          })
+          if (matching.length > 0) {
+            matchedWp = matching[Math.floor(this.rng() * matching.length)]
+            arrivedEmployed = true
+          }
+        }
+      }
+
+      // Clandestine immigrants (no vacancy) arrive with $0 and no job
+      // Legal immigrants arrive with savings proportional to education
+      const initialWealth = hasVacancy ? (IMMIGRANT_INITIAL_WEALTH[education] ?? 50) : 0
 
       const newAgent: Agent = {
         id: uid('agent'),
@@ -732,11 +824,11 @@ export class SimulationEngine {
         velocity: { x: 0, y: 0 },
         target: null,
         targetLocationId: null,
-        age: 18 + Math.floor(this.rng() * 7), // 18-24 years old
+        age: IMMIGRANT_AGE_MIN + Math.floor(this.rng() * (IMMIGRANT_AGE_MAX - IMMIGRANT_AGE_MIN)),
         gender,
         education,
-        state: 'unemployed',   // enter as job-seekers
-        wealth: 0,
+        state: 'unemployed',
+        wealth: initialWealth,
         income: 0,
         tickEarnings: 0,
         homeId: home.id,
@@ -747,7 +839,7 @@ export class SimulationEngine {
         partnerId: null,
         children: 0,
         workplaceId: null,
-        satisfaction: 0.7 + this.rng() * 0.2,
+        satisfaction: hasVacancy ? 0.7 + this.rng() * 0.2 : 0.3 + this.rng() * 0.2,
         needsConsumption: false,
         ticksUnemployed: 0,
         ticksSinceConsumption: 0,
@@ -756,12 +848,15 @@ export class SimulationEngine {
         ticksSick: 0,
         ticksLowSatisfaction: 0,
         ticksAsCriminal: 0,
+        crimeAttemptCooldown: 0,
+        ticksInPrison: 0,
+        prisonSentence: 0,
         deathTick: null,
         carryingResource: false,
         lastPaidTick: -10,
         loan: 0,
         loanPayment: 0,
-        creditScore: 0.5,
+        creditScore: hasVacancy ? 0.5 : 0.2,
         ownedBusinessId: null,
         businessDebt: 0,
         businessDebtPayment: 0,
@@ -773,13 +868,19 @@ export class SimulationEngine {
         lifeEvents: [{
           tick: this.tick,
           type: 'born',
-          description: `Immigrated (${gender}, edu: ${education})`,
+          description: `Immigrated (${gender}, edu: ${education}${arrivedEmployed ? ', with job offer' : ''}${!hasVacancy ? ', clandestine' : ''})`,
         }],
-        wealthHistory: [0],
-        wealthArchive: [0],
+        wealthHistory: [initialWealth],
+        wealthArchive: [initialWealth],
         stateHistory: [{ tick: this.tick, from: 'unemployed' as const, to: 'unemployed' as const }],
       }
       this.agents.push(newAgent)
+
+      // Skilled migration: immediately hire if matched
+      if (arrivedEmployed && matchedWp) {
+        this.hireAgent(newAgent, matchedWp)
+      }
+
       this.tickBirths++
     }
   }
@@ -803,7 +904,8 @@ export class SimulationEngine {
     bank:       [1, 1],   // 1 week at bank
     resource:   [2, 4],   // 2-4 weeks gathering expedition
     factory:    [1, 2],   // 1-2 weeks at factory
-    home:       [1, 3],   // 1-3 weeks rest at home
+    home:           [1, 3],   // 1-3 weeks rest at home
+    police_station: [1, 1],   // 1 week brief stop at station
   }
 
   private getStayDuration(locType: string): number {
@@ -847,6 +949,12 @@ export class SimulationEngine {
     const atType = atLoc?.type ?? ''
 
     agent.targetLocationId = null
+
+    // --- POLICE: don't go home between patrols — pick new patrol immediately ---
+    if (agent.state === 'police') {
+      this.pickNewActivity(agent)
+      return
+    }
 
     // --- At HOME: rest is over, pick a new outing ---
     if (atHome) {
@@ -909,7 +1017,7 @@ export class SimulationEngine {
     // Health/Education (Q4)
     if (this.isAnnualQuarter(ANNUAL_Q4) && agent.state !== 'child') {
       if (agent.isSick) {
-        this.sendToNearest(agent, 'government')
+        this.sendToNearest(agent, 'hospital')
         agent.currentAction = 'resting'
         return
       }
@@ -934,14 +1042,40 @@ export class SimulationEngine {
       return
     }
 
-    // --- Police: patrol areas to find criminals ---
+    // --- Police: actively patrol and pursue criminals ---
+    // Police WALK (not snap) so they are visibly moving through the world.
+    // They prioritize pursuing criminals when any exist.
     if (agent.state === 'police') {
       agent.currentAction = 'patrolling'
-      // Patrol: wander near markets, workplaces, and homes where crime happens
+
+      // Priority 1: Pursue nearest criminal (50% when criminals exist)
+      const criminals = this.agents.filter(a => a.state === 'criminal')
+      if (criminals.length > 0 && this.rng() < 0.50) {
+        // Find nearest criminal and walk toward them (with slight offset for realism)
+        criminals.sort((a, b) =>
+          vec2Distance(agent.position, a.position) - vec2Distance(agent.position, b.position)
+        )
+        const target = criminals[0]
+        agent.target = vec2(
+          target.position.x + (this.rng() - 0.5) * 4,
+          target.position.y + (this.rng() - 0.5) * 4,
+        )
+        return
+      }
+
+      // Priority 2: Random patrol — WALK to locations (not snap)
       const roll = this.rng()
       if (roll < 0.35) {
-        this.sendToNearest(agent, 'market')
+        // Patrol near market (high-traffic area)
+        const market = this.locations.find(l => l.type === 'market')
+        if (market) {
+          agent.target = vec2(
+            market.position.x + (this.rng() - 0.5) * market.radius * 2,
+            market.position.y + (this.rng() - 0.5) * market.radius * 2,
+          )
+        }
       } else if (roll < 0.60) {
+        // Patrol near workplaces
         const workplaces = this.locations.filter((l) => l.type === 'workplace')
         if (workplaces.length > 0) {
           const wp = workplaces[Math.floor(this.rng() * workplaces.length)]
@@ -950,48 +1084,70 @@ export class SimulationEngine {
             wp.position.y + (this.rng() - 0.5) * 8,
           )
         }
-      } else if (roll < 0.80) {
+      } else if (roll < 0.85) {
         // Patrol residential areas
         const homes = this.locations.filter((l) => l.type === 'home')
         if (homes.length > 0) {
           const h = homes[Math.floor(this.rng() * homes.length)]
-          agent.target = vec2(h.position.x, h.position.y)
+          agent.target = vec2(
+            h.position.x + (this.rng() - 0.5) * 6,
+            h.position.y + (this.rng() - 0.5) * 6,
+          )
         }
       } else {
-        // Return to station briefly
+        // Return to station briefly for rest
         this.sendToNearest(agent, 'police_station')
       }
       return
     }
 
-    // --- Criminal: patrol populated areas ---
+    // --- Criminal: wander populated areas looking for victims ---
+    // Criminals WALK (not snap) so police can pursue and intercept them.
     if (agent.state === 'criminal') {
       agent.currentAction = 'stealing'
-      if (this.rng() < 0.4) {
-        this.sendToNearest(agent, 'market')
-      } else if (this.rng() < 0.3) {
-        const workplaces = this.locations.filter((l) => l.type === 'workplace')
-        if (workplaces.length > 0) {
-          const wp = workplaces[Math.floor(this.rng() * workplaces.length)]
+      const roll = this.rng()
+      if (roll < 0.40) {
+        // Wander toward market (crowded, good targets)
+        const market = this.locations.find(l => l.type === 'market')
+        if (market) {
           agent.target = vec2(
-            wp.position.x + (this.rng() - 0.5) * 6,
-            wp.position.y + (this.rng() - 0.5) * 6,
+            market.position.x + (this.rng() - 0.5) * market.radius * 2,
+            market.position.y + (this.rng() - 0.5) * market.radius * 2,
+          )
+        }
+      } else if (roll < 0.70) {
+        // Wander near workplaces or residential areas
+        const targets = this.locations.filter(l => l.type === 'workplace' || l.type === 'home')
+        if (targets.length > 0) {
+          const t = targets[Math.floor(this.rng() * targets.length)]
+          agent.target = vec2(
+            t.position.x + (this.rng() - 0.5) * 6,
+            t.position.y + (this.rng() - 0.5) * 6,
           )
         }
       } else {
-        this.sendToNearest(agent, 'home')
-        agent.currentAction = 'resting'
+        // Random wander
+        agent.target = vec2(
+          agent.position.x + (this.rng() - 0.5) * 20,
+          agent.position.y + (this.rng() - 0.5) * 20,
+        )
       }
       return
     }
 
-    // --- Retired: pension, shopping, or stay home ---
+    // --- Retired: pension, hospital, amusement, shopping, or stay home ---
     if (agent.state === 'retired') {
-      if (this.tick - agent.lastPaidTick >= 20 && this.rng() < 0.15) {
+      if (agent.isSick && this.rng() < 0.30) {
+        this.sendToNearest(agent, 'hospital')
+        agent.currentAction = 'resting'
+      } else if (this.tick - agent.lastPaidTick >= 20 && this.rng() < 0.15) {
         this.sendToNearest(agent, 'government')
         agent.currentAction = 'commuting'
       } else if (agent.needsConsumption || agent.ticksSinceConsumption > this.consumptionInterval) {
         this.sendToNearest(agent, 'market')
+        agent.currentAction = 'shopping'
+      } else if (!agent.isSick && agent.wealth > this.cfg.amusementParkEntryCost * 2 && this.rng() < this.cfg.amusementParkVisitProb) {
+        this.sendToNearest(agent, 'amusement_park')
         agent.currentAction = 'shopping'
       } else {
         this.sendToNearest(agent, 'home')
@@ -1000,9 +1156,12 @@ export class SimulationEngine {
       return
     }
 
-    // --- Unemployed: job search, study, benefits, shop, or stay home ---
+    // --- Unemployed: hospital, job search, study, benefits, shop, or stay home ---
     if (agent.state === 'unemployed') {
-      if (this.rng() < 0.40) {
+      if (agent.isSick && this.rng() < 0.25) {
+        this.sendToNearest(agent, 'hospital')
+        agent.currentAction = 'resting'
+      } else if (this.rng() < 0.40) {
         this.sendToHiringWorkplace(agent)
         agent.currentAction = 'job_seeking'
       } else if (agent.education !== 'high' && agent.wealth > 80 && this.rng() < 0.25) {
@@ -1033,6 +1192,13 @@ export class SimulationEngine {
         return
       }
 
+      // Sick: visit hospital instead of working
+      if (agent.isSick && this.rng() < 0.20) {
+        this.sendToNearest(agent, 'hospital')
+        agent.currentAction = 'resting'
+        return
+      }
+
       // Financial trouble → bank
       if (agent.wealth < 20 && agent.loan <= 0 && agent.creditScore > 0.3 && this.rng() < 0.15) {
         this.sendToNearest(agent, 'bank')
@@ -1043,6 +1209,13 @@ export class SimulationEngine {
       // Shopping errand before work
       if (agent.needsConsumption && this.rng() < 0.25) {
         this.sendToNearest(agent, 'market')
+        agent.currentAction = 'shopping'
+        return
+      }
+
+      // Leisure: amusement park visit (if not sick, has money, random chance)
+      if (!agent.isSick && agent.wealth > this.cfg.amusementParkEntryCost * 3 && this.rng() < this.cfg.amusementParkVisitProb * 0.5) {
+        this.sendToNearest(agent, 'amusement_park')
         agent.currentAction = 'shopping'
         return
       }
@@ -1369,6 +1542,46 @@ export class SimulationEngine {
       }
     }
 
+    // --- Hospital: treatment for sick agents (government pays) ---
+    if (loc.type === 'hospital') {
+      // Base maintenance cost per visit (staff, equipment)
+      this.tickGovExpHospital += this.cfg.hospitalMaintenanceCost / Math.max(1, this.agents.filter(a => a.state !== 'dead').length) // spread base cost
+
+      if (agent.isSick) {
+        // Government pays treatment cost per sick agent visit
+        const treatmentCost = this.cfg.hospitalTreatmentCost
+        this.governmentTreasury -= treatmentCost
+        this.tickGovExpHospital += treatmentCost
+
+        // Chance to recover from disease at hospital
+        if (this.rng() < this.cfg.hospitalRecoveryProb) {
+          agent.isSick = false
+          agent.ticksSick = 0
+          agent.satisfaction = clamp(agent.satisfaction + 0.10, 0, 1)
+          agent.lifeEvents.push({
+            tick: this.tick, type: 'recovered',
+            description: 'Recovered from illness at hospital',
+          })
+        }
+      }
+    }
+
+    // --- Amusement Park: pay entry, boost satisfaction ---
+    if (loc.type === 'amusement_park' && agent.wealth > this.cfg.amusementParkEntryCost) {
+      agent.wealth -= this.cfg.amusementParkEntryCost
+      agent.satisfaction = clamp(agent.satisfaction + this.cfg.amusementParkSatBoost, 0, 1)
+      agent.needsConsumption = false
+      agent.ticksSinceConsumption = 0
+      if (this.rng() < 0.3) {
+        this.moneyEvents.push({
+          agentId: agent.id,
+          position: { ...agent.position },
+          amount: -Math.round(this.cfg.amusementParkEntryCost),
+          tick: this.tick,
+        })
+      }
+    }
+
     // --- Bank: apply for loan ---
     if (loc.type === 'bank' && agent.loan <= 0 && agent.creditScore > 0.3) {
       const isEmployed = agent.state === 'employed' || agent.state === 'business_owner'
@@ -1603,8 +1816,8 @@ export class SimulationEngine {
       // Alternate between apartments and houses
       const isApartment = this.rng() < 0.5
       const value = isApartment
-        ? 350 + Math.round(this.rng() * 250)
-        : 200 + Math.round(this.rng() * 200)
+        ? 500 + Math.round(this.rng() * 400)   // apartment: more expensive to build
+        : 250 + Math.round(this.rng() * 200)
 
       const newHome: Location = {
         id: uid(isApartment ? 'apt' : 'house'),
@@ -1614,7 +1827,7 @@ export class SimulationEngine {
         jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
         housingType: isApartment ? 'apartment' : 'house',
         housingValue: value,
-        rent: Math.round(value * (isApartment ? 0.06 : 0.05)),
+        rent: Math.round(value * (isApartment ? this.cfg.apartmentRentRatio : this.cfg.houseRentRatio)),
         maxResidents: isApartment ? 5 : 2,
         residentsCount: 0,
       }
@@ -1769,6 +1982,7 @@ export class SimulationEngine {
       retiredCount: retired,
       childCount: children,
       criminalCount: criminals,
+      prisonerCount: agents.filter((a) => a.state === 'prisoner').length,
       policeCount: agents.filter((a) => a.state === 'police').length,
       giniCoefficient: computeGiniFast(rawWealths),
       medianWealth: median(rawWealths),
@@ -1815,6 +2029,8 @@ export class SimulationEngine {
       govExpInfra: this.tickGovExpInfra,
       govExpBenefits: this.tickGovExpBenefits,
       govExpPolice: this.tickGovExpPolice,
+      govExpPrison: this.tickGovExpPrison,
+      govExpHospital: this.tickGovExpHospital,
       govExpUBI: this.tickGovExpUBI,
       // Social unrest
       strikeRate: (() => {
@@ -1864,7 +2080,7 @@ export class SimulationEngine {
       tick: 0, year: 0,
       totalPopulation: 0,
       employedCount: 0, unemployedCount: 0, businessOwnerCount: 0, retiredCount: 0, childCount: 0, criminalCount: 0,
-      policeCount: 0,
+      prisonerCount: 0, policeCount: 0,
       giniCoefficient: 0, medianWealth: 0, meanWealth: 0,
       top10WealthShare: 0, bottom50WealthShare: 0,
       medianIncome: 0,
@@ -1874,7 +2090,7 @@ export class SimulationEngine {
       classTransitions: 0, meanSatisfaction: 0,
       gdp: 0, gdpPerCapita: 0,
       taxRevenue: 0, redistributionPaid: 0,
-      governmentTreasury: 0, govExpPensions: 0, govExpInfra: 0, govExpBenefits: 0, govExpPolice: 0, govExpUBI: 0,
+      governmentTreasury: 0, govExpPensions: 0, govExpInfra: 0, govExpBenefits: 0, govExpPolice: 0, govExpPrison: 0, govExpHospital: 0, govExpUBI: 0,
       strikeRate: 0, arrestsThisTick: 0,
       births: 0, deaths: 0, divorces: 0, marriages: 0,
       prematureDeaths: 0, diseases: 0, crimes: 0, layoffs: 0,

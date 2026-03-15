@@ -5,6 +5,8 @@
 // ============================================================
 
 import type { SimulationContext } from '../SimulationContext'
+import type { Agent } from '../types'
+import { clamp } from '../utils'
 import {
   POLICE_SALARY,
   PENSION_PER_RETIREE,
@@ -13,6 +15,16 @@ import {
   UBI_TREASURY_SHARE,
   BENEFIT_DECAY_TICKS,
   BENEFIT_DECAY_RATE,
+  ARREST_CONFISCATE_RATE,
+  ARREST_CONFISCATE_CAP,
+  POLICE_PER_CRIMINAL,
+  POLICE_UNREST_THRESHOLD,
+  POLICE_UNREST_HIRE_RATE,
+  POLICE_MAX_HIRE_PER_TICK,
+  POLICE_MAX_FIRE_PER_TICK,
+  POLICE_MIN_AGE,
+  POLICE_MAX_AGE,
+  STRIKE_SAT_THRESHOLD,
 } from '../constants'
 
 // --- Helper: spend from treasury, never go below 0 ---
@@ -55,6 +67,9 @@ export function processGovernment(ctx: SimulationContext): void {
     p.income = actualPolicePay // actual pay, may be reduced if treasury short
   }
   ctx.tickGovExpPolice = policeFunded
+
+  // --- 1b. Prison maintenance + release ---
+  processPrison(ctx, living)
 
   // --- 2. Pensions (retired agents) ---
   const retirees = living.filter((a) => a.state === 'retired')
@@ -115,17 +130,6 @@ export function processGovernment(ctx: SimulationContext): void {
 // ============================================================
 // Police hiring/firing — scales with crime & dissatisfaction
 // ============================================================
-import type { Agent } from '../types'
-import {
-  POLICE_BASE_RATIO,
-  POLICE_PER_CRIMINAL,
-  POLICE_UNREST_THRESHOLD,
-  POLICE_UNREST_HIRE_RATE,
-  POLICE_MAX_HIRE_PER_TICK,
-  POLICE_MAX_FIRE_PER_TICK,
-  POLICE_MIN_AGE,
-  POLICE_MAX_AGE,
-} from '../constants'
 
 function processPoliceHiring(ctx: SimulationContext, living: Agent[]): void {
   const criminals = living.filter((a) => a.state === 'criminal').length
@@ -140,7 +144,7 @@ function processPoliceHiring(ctx: SimulationContext, living: Agent[]): void {
   const dissatisfactionRate = dissatisfied / N
 
   // Base: 1 police per POLICE_BASE_RATIO agents; increase with crime & dissatisfaction
-  const basePolice = Math.ceil(N / POLICE_BASE_RATIO)
+  const basePolice = Math.ceil(N / ctx.config.policeBaseRatio)
   const crimeBonus = Math.ceil(criminals * POLICE_PER_CRIMINAL)
   const unrestBonus = dissatisfactionRate > POLICE_UNREST_THRESHOLD
     ? Math.ceil(N * POLICE_UNREST_HIRE_RATE) : 0
@@ -203,10 +207,6 @@ function processPoliceHiring(ctx: SimulationContext, living: Agent[]): void {
 // ============================================================
 // Strikes — widespread dissatisfaction causes workers to stop
 // ============================================================
-import {
-  STRIKE_DISSATISFACTION_THRESHOLD,
-  STRIKE_SAT_THRESHOLD,
-} from '../constants'
 
 function processStrikes(ctx: SimulationContext, living: Agent[]): void {
   const adults = living.filter(a =>
@@ -218,11 +218,11 @@ function processStrikes(ctx: SimulationContext, living: Agent[]): void {
   const dissatisfactionRate = dissatisfied / adults.length
 
   // Strikes trigger when dissatisfaction rate exceeds threshold
-  if (dissatisfactionRate < STRIKE_DISSATISFACTION_THRESHOLD) return
+  if (dissatisfactionRate < ctx.config.strikeDissatisfactionThreshold) return
 
   // Strike probability scales with dissatisfaction beyond threshold
   const strikeProbability = Math.min(0.3,
-    (dissatisfactionRate - STRIKE_DISSATISFACTION_THRESHOLD) * 2
+    (dissatisfactionRate - ctx.config.strikeDissatisfactionThreshold) * 2
   )
 
   const employed = living.filter(a => a.state === 'employed')
@@ -244,40 +244,87 @@ function processStrikes(ctx: SimulationContext, living: Agent[]): void {
 }
 
 // ============================================================
-// Arrest mechanic — police encounters criminal
+// Prison processing — tick sentences, release, maintenance cost
 // ============================================================
-import { clamp } from '../utils'
-import {
-  ARREST_SUCCESS_RATE,
-  ARREST_CONFISCATE_RATE,
-  ARREST_CONFISCATE_CAP,
-} from '../constants'
+function processPrison(ctx: SimulationContext, living: Agent[]): void {
+  const prisoners = living.filter(a => a.state === 'prisoner')
+  if (prisoners.length === 0) return
+
+  // Maintenance cost: government pays per prisoner per tick
+  const totalPrisonCost = prisoners.length * ctx.config.prisonCostPerPrisoner
+  const prisonSpent = spend(ctx, totalPrisonCost)
+  ctx.tickGovExpPrison = prisonSpent
+
+  // Process each prisoner: tick sentence, release when done
+  for (const prisoner of prisoners) {
+    prisoner.ticksInPrison++
+
+    // Sentence served → release
+    if (prisoner.ticksInPrison >= prisoner.prisonSentence) {
+      prisoner.state = 'unemployed'
+      prisoner.ticksInPrison = 0
+      prisoner.prisonSentence = 0
+      prisoner.ticksAsCriminal = 0
+      prisoner.ticksUnemployed = 0
+      prisoner.currentAction = 'idle'
+      prisoner.satisfaction = clamp(prisoner.satisfaction + 0.1, 0, 1)
+      prisoner.creditScore = clamp(prisoner.creditScore - 0.15, 0, 1) // criminal record penalty
+      prisoner.lifeEvents.push({
+        tick: ctx.tick, type: 'released_from_prison',
+        description: `Released from prison after serving sentence`,
+      })
+      // Send home
+      ctx.sendToNearest(prisoner, 'home')
+      prisoner.stayTicksRemaining = 2
+    }
+  }
+}
+
+// ============================================================
+// Arrest mechanic — police encounters criminal → prison
+// ============================================================
 
 export function arrestCriminal(ctx: SimulationContext, police: Agent, criminal: Agent): void {
-  if (ctx.rng() > ARREST_SUCCESS_RATE) return
+  if (ctx.rng() > ctx.config.arrestSuccessRate) return
 
   ctx.tickArrests++
-  // Criminal becomes unemployed (rehabilitation through arrest)
-  criminal.state = 'unemployed'
-  criminal.ticksAsCriminal = 0
-  criminal.ticksUnemployed = 0
-  criminal.currentAction = 'arrested'
-  criminal.satisfaction = clamp(criminal.satisfaction + 0.05, 0, 1)
+
   // Confiscate stolen wealth (partial)
   const confiscated = Math.min(criminal.wealth * ARREST_CONFISCATE_RATE, ARREST_CONFISCATE_CAP)
   criminal.wealth -= confiscated
   ctx.governmentTreasury += confiscated
 
+  // Determine sentence length based on criminal history
+  const baseSentence = ctx.config.prisonSentenceMin + Math.floor(ctx.rng() * (ctx.config.prisonSentenceMax - ctx.config.prisonSentenceMin))
+  // Repeat offenders get longer sentences
+  const repeatBonus = criminal.lifeEvents.filter(e => e.type === 'sent_to_prison').length * 6
+  const sentence = Math.min(baseSentence + repeatBonus, ctx.config.prisonSentenceMax * 2)
+
+  // Criminal → prisoner
+  criminal.state = 'prisoner'
+  criminal.ticksInPrison = 0
+  criminal.prisonSentence = sentence
+  criminal.currentAction = 'imprisoned'
+  criminal.income = 0
+  criminal.satisfaction = clamp(criminal.satisfaction - 0.15, 0, 1)
+
+  // Free workplace slot if somehow employed (shouldn't happen for criminals, but safety)
+  if (criminal.workplaceId) {
+    const wp = ctx.locations.find(l => l.id === criminal.workplaceId)
+    if (wp) wp.filledSlots = Math.max(0, wp.filledSlots - 1)
+    criminal.workplaceId = null
+  }
+
   criminal.lifeEvents.push({
-    tick: ctx.tick, type: 'arrested_criminal',
-    description: `Arrested by police (lost $${Math.round(confiscated)})`,
+    tick: ctx.tick, type: 'sent_to_prison',
+    description: `Arrested and sentenced to ${sentence} weeks in prison (lost $${Math.round(confiscated)})`,
   })
   police.lifeEvents.push({
     tick: ctx.tick, type: 'arrested_criminal',
-    description: `Arrested a criminal (confiscated $${Math.round(confiscated)})`,
+    description: `Arrested a criminal → prison (confiscated $${Math.round(confiscated)})`,
   })
 
-  // Send criminal home
-  ctx.sendToNearest(criminal, 'home')
-  criminal.stayTicksRemaining = 4 // detained at home for a few ticks
+  // Send to prison location
+  ctx.sendToNearest(criminal, 'prison')
+  criminal.stayTicksRemaining = sentence // stay locked up for full sentence
 }

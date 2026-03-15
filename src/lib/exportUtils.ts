@@ -91,3 +91,115 @@ export function sanitizeWorldStateForExport(state: Record<string, unknown>): Rec
   const agents = (rest.agents as Record<string, unknown>[]).map(sanitizeAgentForExport)
   return { ...rest, agents }
 }
+
+// ============================================================
+// Sampling options — reduce CSV size for large datasets
+// ============================================================
+export interface SampleOptions {
+  /** Keep every Nth row (time-series downsampling). Default: 1 (no skip). */
+  every?: number
+  /** Maximum number of rows to export. Default: Infinity. */
+  maxRows?: number
+  /** Maximum number of agents to export (random subset). Default: Infinity. */
+  maxAgents?: number
+  /** Always include the first and last row even when sampling. Default: true. */
+  keepEnds?: boolean
+}
+
+/**
+ * Apply sampling to an array: keep every Nth item, optionally cap total,
+ * and optionally always include first + last.
+ */
+function applySample<T>(data: T[], opts?: SampleOptions): T[] {
+  if (!opts || data.length === 0) return data
+  const every = opts.every ?? 1
+  const maxRows = opts.maxRows ?? Infinity
+  const keepEnds = opts.keepEnds ?? true
+
+  let sampled: T[]
+  if (every <= 1) {
+    sampled = data
+  } else {
+    sampled = data.filter((_, i) => i % every === 0)
+    // Always include last row for time-series continuity
+    if (keepEnds && data.length > 1) {
+      const last = data[data.length - 1]
+      if (sampled[sampled.length - 1] !== last) sampled.push(last)
+    }
+  }
+
+  if (sampled.length > maxRows) {
+    const head = sampled.slice(0, maxRows - (keepEnds ? 1 : 0))
+    if (keepEnds) head.push(sampled[sampled.length - 1])
+    sampled = head
+  }
+
+  return sampled
+}
+
+/**
+ * Download a string as a CSV file.
+ */
+export function downloadCSV(content: string, filename: string): void {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  triggerDownload(blob, filename)
+}
+
+/**
+ * Convert an array of metrics snapshots to CSV string.
+ * Each row = one tick snapshot with all SimMetrics fields.
+ *
+ * @param opts.every  — keep every Nth tick (e.g., 4 = monthly with ticksPerYear=52)
+ * @param opts.maxRows — hard cap on total rows
+ */
+export function metricsToCSV(metrics: Record<string, unknown>[], opts?: SampleOptions): string {
+  if (metrics.length === 0) return ''
+  const sampled = applySample(metrics, opts)
+  const keys = Object.keys(sampled[0]).filter(k => typeof sampled[0][k] === 'number' || typeof sampled[0][k] === 'string')
+  const header = keys.join(',')
+  const rows = sampled.map(m =>
+    keys.map(k => {
+      const v = m[k]
+      return typeof v === 'number' ? (Number.isInteger(v) ? v : (v as number).toFixed(6)) : String(v ?? '')
+    }).join(',')
+  )
+  return [header, ...rows].join('\n')
+}
+
+/**
+ * Convert agent array to CSV for cross-sectional analysis.
+ *
+ * @param opts.maxAgents — export only a random subset of agents
+ * @param opts.maxRows   — alias for maxAgents in this context
+ */
+export function agentsToCSV(agents: Record<string, unknown>[], opts?: SampleOptions): string {
+  if (agents.length === 0) return ''
+  const maxAgents = opts?.maxAgents ?? opts?.maxRows ?? Infinity
+  let subset = agents
+  if (maxAgents < agents.length) {
+    // Deterministic sampling: evenly spaced indices
+    const step = agents.length / maxAgents
+    subset = Array.from({ length: maxAgents }, (_, i) => agents[Math.floor(i * step)])
+  }
+  const keys = ['id', 'age', 'gender', 'education', 'state', 'wealth', 'income', 'satisfaction',
+    'isSick', 'partnerId', 'children', 'creditScore', 'homeOwned', 'ownedBusinessId']
+  const header = keys.join(',')
+  const rows = subset.map(a =>
+    keys.map(k => {
+      const v = a[k]
+      if (v === null || v === undefined) return ''
+      if (typeof v === 'number') return Number.isInteger(v) ? v : (v as number).toFixed(4)
+      if (typeof v === 'boolean') return v ? '1' : '0'
+      return String(v)
+    }).join(',')
+  )
+  return [header, ...rows].join('\n')
+}
+
+/**
+ * Estimate CSV size in KB before generating.
+ * Useful for showing a warning in the UI.
+ */
+export function estimateCSVSize(rowCount: number, colCount: number, avgCellBytes = 8): number {
+  return Math.round((rowCount * colCount * avgCellBytes) / 1024)
+}

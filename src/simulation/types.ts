@@ -36,12 +36,12 @@ export type HeatmapMode = 'none' | 'wealth' | 'poverty' | 'illness' | 'unemploym
 // ============================================================
 // Agent State
 // ============================================================
-export type AgentState = 'employed' | 'unemployed' | 'business_owner' | 'retired' | 'criminal' | 'dead' | 'child' | 'police'
+export type AgentState = 'employed' | 'unemployed' | 'business_owner' | 'retired' | 'criminal' | 'dead' | 'child' | 'police' | 'prisoner'
 
 // ============================================================
 // Agent current action (for emoji display)
 // ============================================================
-export type AgentAction = 'idle' | 'working' | 'shopping' | 'job_seeking' | 'studying' | 'commuting' | 'resting' | 'stealing' | 'dying' | 'hauling' | 'patrolling' | 'arrested' | 'striking'
+export type AgentAction = 'idle' | 'working' | 'shopping' | 'job_seeking' | 'studying' | 'commuting' | 'resting' | 'stealing' | 'dying' | 'hauling' | 'patrolling' | 'arrested' | 'striking' | 'imprisoned'
 
 // ============================================================
 // Agent
@@ -86,6 +86,9 @@ export interface Agent {
   ticksSick: number           // how long sick
   ticksLowSatisfaction: number // consecutive ticks with satisfaction < threshold
   ticksAsCriminal: number     // how long in criminal state
+  crimeAttemptCooldown: number // ticks remaining before next crime attempt
+  ticksInPrison: number        // ticks served in current sentence
+  prisonSentence: number       // total sentence length (0 if not in prison)
   deathTick: number | null    // tick when agent died (for ☠️ display duration)
   // --- Resource transport ---
   carryingResource: boolean  // currently hauling a resource to factory
@@ -125,7 +128,7 @@ export interface StateTransition {
 // ============================================================
 export interface LifeEvent {
   tick: number
-  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide' | 'joined_police' | 'arrested_criminal' | 'went_on_strike'
+  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide' | 'joined_police' | 'arrested_criminal' | 'went_on_strike' | 'sent_to_prison' | 'released_from_prison' | 'crime_failed' | 'recovered' | 'birth_hospital' | 'birth_no_hospital'
   description: string
 }
 
@@ -205,7 +208,7 @@ export const WORKPLACE_CONFIGS: Record<WorkplaceType, WorkplaceConfig> = {
 // ============================================================
 // Location (Point of Interest on the world plane)
 // ============================================================
-export type LocationType = 'home' | 'workplace' | 'market' | 'school' | 'government' | 'resource' | 'factory' | 'bank' | 'police_station'
+export type LocationType = 'home' | 'workplace' | 'market' | 'school' | 'government' | 'resource' | 'factory' | 'bank' | 'police_station' | 'prison' | 'hospital' | 'amusement_park'
 
 export interface Location {
   id: string
@@ -273,6 +276,108 @@ export const ECONOMY_PRESETS: Record<EconomyType, EconomyPreset> = {
 }
 
 // ============================================================
+// Behavior Configuration — all tunable agent behavior constants
+// Exposed in Advanced Parameters UI, merged with defaults at runtime
+// ============================================================
+export interface BehaviorConfig {
+  // --- Crime ---
+  crimeUnemploymentTicks: number     // ticks unemployed before crime risk
+  crimeWealthThreshold: number       // poverty line for crime trigger
+  crimeSatisfactionThreshold: number // satisfaction below which crime possible
+  crimeSuccessBaseProb: number       // base robbery success probability
+  crimeAttemptCooldown: number       // ticks between crime attempts
+  // --- Prison ---
+  prisonSentenceMin: number          // minimum sentence (ticks)
+  prisonSentenceMax: number          // maximum sentence (ticks)
+  prisonCostPerPrisoner: number      // $/tick maintenance per prisoner
+  // --- Police ---
+  policeBaseRatio: number            // 1 police per N agents
+  arrestSuccessRate: number          // probability of successful arrest
+  policeDeterrentRadius: number      // spatial check radius for deterrence
+  policeDeterrentFactor: number      // each nearby police multiplies success by this
+  // --- Hospital ---
+  hospitalBirthCost: number          // gov pays per birth
+  hospitalTreatmentCost: number      // gov pays per sick visit
+  hospitalMaintenanceCost: number    // base per-tick upkeep
+  hospitalRecoveryProb: number       // recovery chance per visit
+  hospitalBirthMortalityNoHospital: number // extra infant mortality without hospital
+  // --- Amusement Park ---
+  amusementParkEntryCost: number     // agent pays per visit
+  amusementParkSatBoost: number      // satisfaction boost per visit
+  amusementParkVisitProb: number     // probability agent decides to visit
+  // --- Family & Fertility ---
+  normalSatThreshold: number         // satisfaction threshold for conception
+  poorSatThreshold: number           // lower threshold for poor couples
+  normalMaxChildren: number          // max children for normal families
+  poorMaxChildren: number            // max children for poor families
+  povertyFertilityBoostMax: number   // max conception failure reduction for poor
+  // --- Housing ---
+  apartmentRentRatio: number         // annual rent as fraction of value (apartments)
+  houseRentRatio: number             // annual rent as fraction of value (houses)
+  // --- Strikes ---
+  strikeDissatisfactionThreshold: number
+  strikeBaseProbability: number
+  // --- Economy ---
+  capitalReturnRate: number          // annual return on wealth (Piketty r > g)
+  capitalReturnThreshold: number     // min wealth for capital returns
+  passiveLivingCost: number          // $/tick base cost of living
+  entrepreneurProb: number           // per-tick probability of starting a business
+  // --- Disease ---
+  diseasePovertyTicks: number        // ticks in poverty before sickness
+  diseaseWealthThreshold: number     // wealth below which disease risk rises
+  deathSickTicks: number             // ticks sick before death risk rises
+}
+
+export const DEFAULT_BEHAVIOR_CONFIG: BehaviorConfig = {
+  // Crime
+  crimeUnemploymentTicks: 26,
+  crimeWealthThreshold: 30,
+  crimeSatisfactionThreshold: 0.25,
+  crimeSuccessBaseProb: 0.35,
+  crimeAttemptCooldown: 4,
+  // Prison
+  prisonSentenceMin: 13,
+  prisonSentenceMax: 52,
+  prisonCostPerPrisoner: 8,
+  // Police
+  policeBaseRatio: 50,
+  arrestSuccessRate: 0.6,
+  policeDeterrentRadius: 12,
+  policeDeterrentFactor: 0.4,
+  // Hospital
+  hospitalBirthCost: 25,
+  hospitalTreatmentCost: 15,
+  hospitalMaintenanceCost: 5,
+  hospitalRecoveryProb: 0.25,
+  hospitalBirthMortalityNoHospital: 0.08,
+  // Amusement Park
+  amusementParkEntryCost: 8,
+  amusementParkSatBoost: 0.12,
+  amusementParkVisitProb: 0.10,
+  // Family
+  normalSatThreshold: 0.55,
+  poorSatThreshold: 0.20,
+  normalMaxChildren: 4,
+  poorMaxChildren: 6,
+  povertyFertilityBoostMax: 0.4,
+  // Housing
+  apartmentRentRatio: 0.035,
+  houseRentRatio: 0.05,
+  // Strikes
+  strikeDissatisfactionThreshold: 0.35,
+  strikeBaseProbability: 0.15,
+  // Economy
+  capitalReturnRate: 0.03,
+  capitalReturnThreshold: 200,
+  passiveLivingCost: 3,
+  entrepreneurProb: 0.06,
+  // Disease
+  diseasePovertyTicks: 6,
+  diseaseWealthThreshold: 40,
+  deathSickTicks: 10,
+}
+
+// ============================================================
 // Simulation Parameters (user-controlled)
 // ============================================================
 export interface SimulationParams {
@@ -297,9 +402,12 @@ export interface SimulationParams {
   // Simulation
   ticksPerYear: number          // how many ticks = 1 sim year (default 52, 1 tick = 1 week)
   // Immigration
-  immigrationRate: number        // 0–1 (0 = no immigration, 1 = full replacement up to target pop)
+  immigrationEnabled: boolean    // master toggle — immigration only active when user enables it
+  immigrationRate: number        // 0–1 (intensity when enabled: 0 = trickle, 1 = full)
   // Toggles
   diseasesEnabled: boolean       // whether disease onset & contagion are active
+  // Advanced behavior config (overrides defaults from BehaviorConfig)
+  behaviorConfig: Partial<BehaviorConfig>
 }
 
 export const DEFAULT_PARAMS: SimulationParams = {
@@ -314,8 +422,10 @@ export const DEFAULT_PARAMS: SimulationParams = {
   economyType: 'industrial',
   ticksPerYear: 52,
   enableUBI: false,
-  immigrationRate: 1.0,           // full immigration by default (legacy behavior)
+  immigrationEnabled: false,       // off by default — user must enable in UI
+  immigrationRate: 1.0,           // intensity when enabled
   diseasesEnabled: false,
+  behaviorConfig: {},
 }
 
 // ============================================================
@@ -332,6 +442,7 @@ export interface SimMetrics {
   retiredCount: number
   childCount: number
   criminalCount: number
+  prisonerCount: number
   policeCount: number
   // Inequality
   giniCoefficient: number
@@ -367,6 +478,8 @@ export interface SimMetrics {
   govExpInfra: number           // this tick: infrastructure spending
   govExpBenefits: number        // this tick: unemployment benefits
   govExpPolice: number          // this tick: police salary spending
+  govExpPrison: number          // this tick: prison maintenance cost
+  govExpHospital: number        // this tick: hospital costs (births + treatments)
   govExpUBI: number             // this tick: UBI spending
   // Social unrest
   strikeRate: number            // fraction of workers on strike this tick

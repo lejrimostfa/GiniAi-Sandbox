@@ -3,7 +3,7 @@
 // Each system reads/writes from this context during its process() call
 // ============================================================
 
-import type { Agent, Location, SimulationParams, MoneyEvent } from './types'
+import type { Agent, Location, SimulationParams, MoneyEvent, BehaviorConfig } from './types'
 import type { RNG } from './utils'
 
 export interface SimulationContext {
@@ -11,6 +11,7 @@ export interface SimulationContext {
   agents: Agent[]
   locations: Location[]
   params: SimulationParams
+  config: BehaviorConfig          // merged defaults + user overrides (read by all systems)
   tick: number
   rng: RNG
 
@@ -34,6 +35,8 @@ export interface SimulationContext {
   tickGovExpInfra: number
   tickGovExpBenefits: number
   tickGovExpPolice: number
+  tickGovExpPrison: number
+  tickGovExpHospital: number
   tickGovExpUBI: number
 
   // --- Cumulative automation counters ---
@@ -98,5 +101,7 @@ export function resetTickCounters(ctx: SimulationContext): void {
   ctx.tickGovExpInfra = 0
   ctx.tickGovExpBenefits = 0
   ctx.tickGovExpPolice = 0
+  ctx.tickGovExpPrison = 0
+  ctx.tickGovExpHospital = 0
   ctx.tickGovExpUBI = 0
 }
