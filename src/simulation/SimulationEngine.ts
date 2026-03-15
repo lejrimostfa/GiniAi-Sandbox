@@ -1854,7 +1854,7 @@ export class SimulationEngine {
         housingType: isApartment ? 'apartment' : 'house',
         housingValue: value,
         rent: Math.round(value * (isApartment ? this.cfg.apartmentRentRatio : this.cfg.houseRentRatio)),
-        maxResidents: isApartment ? 5 : 2,
+        maxResidents: isApartment ? 5 : 1,
         residentsCount: 0,
       }
       this.locations.push(newHome)

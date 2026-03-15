@@ -230,7 +230,7 @@ export interface Location {
   housingType?: 'house' | 'apartment' // type of housing
   housingValue?: number        // purchase price of the home (for mortgage)
   rent?: number                // annual rent cost for residents
-  maxResidents?: number        // max families per building (apartment=5, house=1-2)
+  maxResidents?: number        // max families per building (apartment=5, house=1)
   residentsCount?: number      // current number of families/solo agents living here
   // Bank-specific
   interestRate?: number      // annual interest rate on loans

@@ -129,7 +129,7 @@ export function generateLocations(params: SimulationParams, seed: number): Locat
       housingType: 'house',
       housingValue: value,
       rent: Math.round(value * HOUSE_RENT_RATIO), // standard rent for houses
-      maxResidents: 2,                             // small house: 1-2 families
+      maxResidents: 1,                             // house: 1 family
       residentsCount: 0,
     })
   }
