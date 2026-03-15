@@ -15,6 +15,15 @@ import {
   createRNG, computeGiniFast, clamp, median, uid, type RNG,
 } from './utils'
 import { generateWorld } from './WorldGenerator'
+import type { SimulationContext } from './SimulationContext'
+import { processGovernment } from './systems/GovernmentSystem'
+import { processLoans as loanProcessLoans } from './systems/LoanSystem'
+import { processEconomy as econProcessEconomy } from './systems/EconomySystem'
+import { processHousing as housingProcessHousing } from './systems/HousingSystem'
+import { processFamily as familyProcessFamily } from './systems/FamilySystem'
+import { processCausalPhenomena as causalProcess } from './systems/CausalPhenomenaSystem'
+import { processProximityInteractions as proximityProcess } from './systems/ProximitySystem'
+import { runAutomation as autoRunAutomation, processLayoffs as autoProcessLayoffs, processJobMarket as autoProcessJobMarket } from './systems/AutomationSystem'
 
 // ============================================================
 // Engine configuration constants
@@ -29,12 +38,6 @@ const MAX_WEALTH_HISTORY = 200    // sparkline length
 // RETIREMENT_AGE is now derived from params.averageLifespan (see getRetirementAge())
 const BASE_CONSUMPTION_INTERVAL = 5 // ticks between market visits (base for tpy=12)
 const HIRING_SEARCH_RADIUS = 80   // how far agents look for jobs
-const BANKRUPTCY_THRESHOLD = -200  // debt threshold for bankruptcy event
-
-// --- Proximity-based interaction system ---
-// All social events require spatial encounter between agents
-const INTERACTION_RADIUS = 4.0    // agents within this radius can interact socially
-const CRIME_PROXIMITY_RADIUS = 5.0 // criminal must be this close to steal
 
 // --- Annual calendar (quarter indices within ticksPerYear) ---
 // These mandatory events create structured movement where agents converge,
@@ -167,6 +170,89 @@ export class SimulationEngine {
     return Math.round(this.params.averageLifespan * 1.1) // die at ~110% of lifespan
   }
 
+  // --- Build context object for extracted systems ---
+  // Systems receive this context instead of accessing engine internals directly
+  private buildContext(): SimulationContext {
+    return {
+      agents: this.agents,
+      locations: this.locations,
+      params: this.params,
+      tick: this.tick,
+      rng: this.rng,
+      tickBirths: this.tickBirths,
+      tickDeaths: this.tickDeaths,
+      tickDivorces: this.tickDivorces,
+      tickMarriages: this.tickMarriages,
+      tickPrematureDeaths: this.tickPrematureDeaths,
+      tickDiseases: this.tickDiseases,
+      tickCrimes: this.tickCrimes,
+      tickLayoffs: this.tickLayoffs,
+      tickTaxRevenue: this.tickTaxRevenue,
+      tickRedistribution: this.tickRedistribution,
+      tickArrests: this.tickArrests,
+      tickStrikers: this.tickStrikers,
+      governmentTreasury: this.governmentTreasury,
+      tickGovExpPensions: this.tickGovExpPensions,
+      tickGovExpInfra: this.tickGovExpInfra,
+      tickGovExpBenefits: this.tickGovExpBenefits,
+      tickGovExpPolice: this.tickGovExpPolice,
+      tickGovExpUBI: this.tickGovExpUBI,
+      cumulativeAutomatedJobs: this.cumulativeAutomatedJobs,
+      cumulativeAiDisplacedJobs: this.cumulativeAiDisplacedJobs,
+      cumulativeRoboticFired: this.cumulativeRoboticFired,
+      cumulativeAiFired: this.cumulativeAiFired,
+      recentBirths: this.recentBirths,
+      recentCrimes: this.recentCrimes,
+      recentDiseases: this.recentDiseases,
+      moneyEvents: this.moneyEvents,
+      emit: (type: string, data: unknown) => this.emit(type, data),
+      getRetirementAge: () => this.getRetirementAge(),
+      getMaxAge: () => this.getMaxAge(),
+      consumptionInterval: this.consumptionInterval,
+      currentWeekOfYear: () => this.currentWeekOfYear(),
+      isAnnualQuarter: (f: number) => this.isAnnualQuarter(f),
+      sendToNearest: (agent: Agent, locType: string) => this.sendToNearest(agent, locType as any),
+      sendToHiringWorkplace: (agent: Agent) => this.sendToHiringWorkplace(agent),
+      killAgent: (agent: Agent, reason: string) => this.killAgent(agent, reason),
+      fireAgent: (agent: Agent, reason: 'fired' | 'automated' | 'ai_displaced' | 'economic_layoff') => this.fireAgent(agent, reason),
+      bankruptBusiness: (owner: Agent) => this.bankruptBusiness(owner),
+      createBusiness: (agent: Agent) => this.createBusiness(agent),
+      expandHousingIfNeeded: () => this.expandHousingIfNeeded(),
+      reassignHomelessAgents: () => this.reassignHomelessAgents(),
+      totalDisplacementRate: this.metrics.totalDisplacementRate,
+      getVacancyRate: () => this.getVacancyRate(),
+    }
+  }
+
+  // --- Sync context counters back to engine after system runs ---
+  private syncFromContext(ctx: SimulationContext): void {
+    this.tickTaxRevenue = ctx.tickTaxRevenue
+    this.tickRedistribution = ctx.tickRedistribution
+    this.tickArrests = ctx.tickArrests
+    this.tickStrikers = ctx.tickStrikers
+    this.governmentTreasury = ctx.governmentTreasury
+    this.tickGovExpPensions = ctx.tickGovExpPensions
+    this.tickGovExpInfra = ctx.tickGovExpInfra
+    this.tickGovExpBenefits = ctx.tickGovExpBenefits
+    this.tickGovExpPolice = ctx.tickGovExpPolice
+    this.tickGovExpUBI = ctx.tickGovExpUBI
+    this.moneyEvents = ctx.moneyEvents
+    // Sync cumulative automation counters (incremented by runAutomation)
+    this.cumulativeAutomatedJobs = ctx.cumulativeAutomatedJobs
+    this.cumulativeAiDisplacedJobs = ctx.cumulativeAiDisplacedJobs
+    this.cumulativeRoboticFired = ctx.cumulativeRoboticFired
+    this.cumulativeAiFired = ctx.cumulativeAiFired
+    // Sync per-tick event counters (incremented by family, causal, proximity systems)
+    this.tickBirths = ctx.tickBirths
+    this.tickDeaths = ctx.tickDeaths
+    this.tickDivorces = ctx.tickDivorces
+    this.tickMarriages = ctx.tickMarriages
+    this.tickPrematureDeaths = ctx.tickPrematureDeaths
+    this.tickDiseases = ctx.tickDiseases
+    this.tickCrimes = ctx.tickCrimes
+    this.tickLayoffs = ctx.tickLayoffs
+  }
+
   // --- Main simulation tick ---
   step(): WorldState {
     this.tick++
@@ -202,25 +288,29 @@ export class SimulationEngine {
     this.ageAgents()
     this.renewPopulation()
 
+    // Build a single shared context for all systems this tick.
+    // All systems mutate the same context object, so counter increments accumulate correctly.
+    const ctx = this.buildContext()
+
     // 2. Automation runs every tick (probabilities are per-tick scaled)
-    this.runAutomation()
+    autoRunAutomation(ctx)
 
     // Annual processes (once per year)
     if (this.tick % this.params.ticksPerYear === 0) {
-      this.processHousing()
+      housingProcessHousing(ctx)
     }
 
     // 2b. Economic layoffs (runs every tick — owners fire workers to cut costs)
-    this.processLayoffs()
+    autoProcessLayoffs(ctx)
 
     // 2c. Job market self-regulation (shrink excess capacity when vacancy > 10%)
-    this.processJobMarket()
+    autoProcessJobMarket(ctx)
 
     // 2d. Family (runs every tick with per-tick probability for smooth birth curve)
-    this.processFamily()
+    familyProcessFamily(ctx)
 
     // 3. Causal societal phenomena (crime, disease, death, marriage, divorce)
-    this.processCausalPhenomena()
+    causalProcess(ctx)
 
     // 4. Agent decisions
     for (const agent of this.agents) {
@@ -239,16 +329,15 @@ export class SimulationEngine {
 
     // 7. Proximity-based social interactions (crime, contagion, marriage, word-of-mouth, rehab)
     // Runs AFTER movement so interactions are based on actual spatial positions
-    this.processProximityInteractions()
+    proximityProcess(ctx)
 
-    // 8. Economy: wages, expenses, satisfaction
-    this.processEconomy()
+    // 8–9. Extracted systems: Economy → Loans → Government
+    econProcessEconomy(ctx)
+    loanProcessLoans(ctx)
+    processGovernment(ctx)
 
-    // 8b. Loan repayment + credit score
-    this.processLoans()
-
-    // 9. Government: tax & redistribute
-    this.processGovernment()
+    // Sync all counters back to engine from the shared context
+    this.syncFromContext(ctx)
 
     // 10. Update wealth history & trails
     this.updateHistory()
@@ -272,44 +361,7 @@ export class SimulationEngine {
     return totalSlots > 0 ? (totalSlots - filledSlots) / totalSlots : 0
   }
 
-  // ============================================================
-  // Job market self-regulation — shrink excess capacity
-  // When vacancy rate > 10%, workplaces with empty slots downsize
-  // Simulates: businesses that can't fill positions reduce capacity
-  // Workplaces at 0 slots with no owner are removed (market exit)
-  // ============================================================
-  private processJobMarket(): void {
-    const vacancyRate = this.getVacancyRate()
-    // Only apply attrition when there's meaningful oversupply
-    if (vacancyRate <= 0.10) return
-
-    // Attrition probability scales with how far above 10% we are
-    // At 20% vacancy → ~5% chance per workplace per tick
-    // At 30% vacancy → ~10% chance
-    const excessRate = vacancyRate - 0.10
-    const attritionProb = Math.min(0.15, excessRate * 0.5)
-
-    for (const wp of this.locations) {
-      if (wp.type !== 'workplace') continue
-      const emptySlots = wp.jobSlots - wp.filledSlots
-      if (emptySlots <= 0) continue // fully staffed, no attrition
-
-      // Probability proportional to how empty the workplace is
-      const emptyRatio = emptySlots / Math.max(1, wp.jobSlots)
-      if (this.rng() < attritionProb * emptyRatio) {
-        wp.jobSlots = Math.max(wp.filledSlots, wp.jobSlots - 1) // never drop below filled
-      }
-    }
-
-    // Remove workplaces with 0 slots and no owner (market exit)
-    for (let i = this.locations.length - 1; i >= 0; i--) {
-      const wp = this.locations[i]
-      if (wp.type === 'workplace' && wp.jobSlots === 0 && wp.filledSlots === 0 && !wp.ownerId) {
-        this.locations.splice(i, 1)
-        this.emit('location:removed', wp)
-      }
-    }
-  }
+  // Job market → extracted to systems/AutomationSystem.ts (processJobMarket)
 
   // ============================================================
   // Initial job assignment — match agents to workplaces
@@ -525,9 +577,24 @@ export class SimulationEngine {
           const povertyIntensity = Math.max(0, 1 - parentWealth / 100) // 1.0 at $0, 0.0 at $100
           const baseRisk = agent.age < 5 ? 0.03 : 0.008 // under-5 mortality much higher
           const orphanBonus = parents.length === 0 ? 0.05 : 0
-          const deathChance = baseRisk * povertyIntensity + orphanBonus
+          // Large family overcrowding penalty: each sibling above 2 increases mortality
+          const siblings = this.agents.filter(a =>
+            a.state === 'child' && a.homeId === agent.homeId && a.id !== agent.id
+          ).length
+          const overcrowdingPenalty = siblings > 2 ? (siblings - 2) * 0.01 : 0
+          const deathChance = baseRisk * povertyIntensity + orphanBonus + overcrowdingPenalty
 
           if (this.rng() < deathChance) {
+            // --- Parent grief: losing a child is devastating ---
+            for (const parent of parents) {
+              parent.satisfaction = clamp(parent.satisfaction - 0.35, 0, 1) // massive grief
+              parent.ticksLowSatisfaction += 8 // accelerate despair (feeds into divorce/suicide)
+              parent.lifeEvents.push({
+                tick: this.tick,
+                type: 'premature_death',
+                description: `Lost child ${agent.id} (age ${agent.age}) — devastating grief`,
+              })
+            }
             this.killAgent(agent, `Died in childhood (age ${agent.age}) — family poverty`)
             agent.lifeEvents.push({
               tick: this.tick,
@@ -536,6 +603,19 @@ export class SimulationEngine {
             })
             this.tickPrematureDeaths++
             continue
+          }
+        }
+
+        // --- Large poor family strain: each child drains parent satisfaction ---
+        if (parents.length > 0 && parentWealth < 80) {
+          const siblingCount = this.agents.filter(a =>
+            a.state === 'child' && a.homeId === agent.homeId
+          ).length
+          if (siblingCount > 2) {
+            const strainPerChild = 0.008 * (siblingCount - 2) // +0.8% drain per extra child
+            for (const parent of parents) {
+              parent.satisfaction = clamp(parent.satisfaction - strainPerChild, 0, 1)
+            }
           }
         }
       }
@@ -703,169 +783,9 @@ export class SimulationEngine {
   }
 
   // ============================================================
-  // Automation — dual-channel: robotic + AI displacement
-  // Based on Anthropic Economic Index (March 2026):
-  //   - Robotic automation: affects physical/manual labor (factories, warehouses)
-  //   - AI displacement: affects cognitive/white-collar work (offices, programming, finance)
-  // Key insight: AI primarily displaces higher-educated, higher-paid workers
-  // Young workers (22-25) face 14% hiring slowdown in AI-exposed occupations
+  // Automation + Layoffs → extracted to systems/AutomationSystem.ts
+  // Called via autoRunAutomation(ctx), autoProcessLayoffs(ctx), autoProcessJobMarket(ctx) in step()
   // ============================================================
-  private runAutomation(): void {
-    const workplaces = this.locations.filter(
-      (l) => l.type === 'workplace' && l.jobSlots > 0
-    )
-    const tpy = this.params.ticksPerYear
-
-    for (const wp of workplaces) {
-      const config = WORKPLACE_CONFIGS[wp.workplaceType!]
-      const owner = wp.ownerId ? this.agents.find((a) => a.id === wp.ownerId) : null
-      const emptySlots = wp.jobSlots - wp.filledSlots
-
-      // --- Channel 1: Robotic/physical automation ---
-      // A robot replaces multiple workers (2-4 at once) — much cheaper than human labor
-      const roboticProb = (this.params.aiGrowthRate * config.automationRisk) / tpy
-      if (this.rng() < roboticProb) {
-        // How many slots does one robot replace? 2-4 depending on workplace type
-        const bulkSize = config.automationRisk > 0.5 ? 3 + Math.floor(this.rng() * 2) : 2 + Math.floor(this.rng() * 2)
-        const investPerSlot = (wp.wage ?? 30) * 10 // robot costs ~10 weeks of wage (vs 52 weeks/year human)
-
-        if (owner && owner.state === 'business_owner') {
-          owner.wealth -= investPerSlot * bulkSize
-          owner.lifeEvents.push({
-            tick: this.tick, type: 'automation_savings',
-            description: `Invested $${Math.round(investPerSlot * bulkSize)} in robot replacing ${bulkSize} workers`,
-          })
-        }
-
-        for (let i = 0; i < bulkSize && wp.jobSlots > 0; i++) {
-          // Fire a filled worker or eliminate an empty slot
-          if (wp.filledSlots > 0 && (emptySlots === 0 || this.rng() < 0.6)) {
-            const worker = this.agents.find(
-              (a) => a.workplaceId === wp.id && a.state === 'employed'
-            )
-            if (worker) {
-              this.fireAgent(worker, 'automated')
-              this.cumulativeRoboticFired++
-            }
-          } else if (wp.jobSlots > wp.filledSlots) {
-            wp.jobSlots = Math.max(0, wp.jobSlots - 1)
-            wp.automatedSlots++
-          }
-          this.cumulativeAutomatedJobs++
-        }
-      }
-
-      // --- Channel 2: AI/LLM displacement ---
-      // One AI tool replaces 2-5 cognitive workers (even more efficient than robots)
-      const aiProb = (this.params.aiDiffusionRate * config.aiExposure) / tpy
-      if (this.rng() < aiProb) {
-        // AI is even more scalable: 2-5 workers replaced per adoption event
-        const bulkSize = config.aiExposure > 0.5 ? 3 + Math.floor(this.rng() * 3) : 2 + Math.floor(this.rng() * 2)
-        const investPerSlot = (wp.wage ?? 30) * 6 // AI costs ~6 weeks of wage
-
-        if (owner && owner.state === 'business_owner') {
-          owner.wealth -= investPerSlot * bulkSize
-          owner.lifeEvents.push({
-            tick: this.tick, type: 'automation_savings',
-            description: `Invested $${Math.round(investPerSlot * bulkSize)} in AI replacing ${bulkSize} workers`,
-          })
-        }
-
-        // Sort workers by vulnerability: higher education + higher age = more exposed
-        const workers = this.agents.filter(
-          (a) => a.workplaceId === wp.id && a.state === 'employed'
-        ).sort((a, b) => {
-          const eduScore = (e: string) => e === 'high' ? 3 : e === 'medium' ? 2 : 1
-          const vulnA = eduScore(a.education) * 0.6 + (a.age / 80) * 0.4
-          const vulnB = eduScore(b.education) * 0.6 + (b.age / 80) * 0.4
-          return vulnB - vulnA
-        })
-
-        let workerIdx = 0
-        for (let i = 0; i < bulkSize && wp.jobSlots > 0; i++) {
-          const emptyNow = wp.jobSlots - wp.filledSlots
-          if (workerIdx < workers.length && (emptyNow === 0 || this.rng() < 0.7)) {
-            this.fireAgent(workers[workerIdx], 'ai_displaced')
-            this.cumulativeAiFired++
-            workerIdx++
-          } else if (wp.jobSlots > wp.filledSlots) {
-            wp.jobSlots = Math.max(0, wp.jobSlots - 1)
-            wp.aiDisplacedSlots++
-          }
-          this.cumulativeAiDisplacedJobs++
-        }
-      }
-    }
-
-    // --- AI creates new high-skill jobs (fewer slots, higher wages) ---
-    // New job creation is suppressed as displacement grows (automation destroys more than it creates)
-    // At 0% displacement → full creation rate. At 50% → 25% rate. At 80%+ → nearly 0.
-    const displacementDampener = Math.max(0.05, 1 - this.metrics.totalDisplacementRate * 2)
-    const creationProb = ((this.params.aiGrowthRate + this.params.aiDiffusionRate) * 0.2 * displacementDampener) / tpy
-    if (this.rng() < creationProb && this.getVacancyRate() < 0.08) {
-      const existingWp = this.locations.filter((l) => l.type === 'workplace')
-      if (existingWp.length > 0) {
-        const base = existingWp[Math.floor(this.rng() * existingWp.length)]
-        const newType: WorkplaceType = this.rng() > 0.5 ? 'skilled' : 'creative'
-        const newWp: Location = {
-          id: uid('wp'),
-          type: 'workplace',
-          position: vec2(
-            base.position.x + (this.rng() - 0.5) * 10,
-            base.position.y + (this.rng() - 0.5) * 10,
-          ),
-          radius: 2,
-          workplaceType: newType,
-          jobSlots: 2 + Math.floor(this.rng() * 3),
-          filledSlots: 0,
-          automatedSlots: 0,
-          aiDisplacedSlots: 0,
-          wage: WORKPLACE_CONFIGS[newType].baseWage * (1 + this.rng() * 0.3),
-        }
-        this.locations.push(newWp)
-        this.emit('location:created', newWp)
-      }
-    }
-  }
-
-  // ============================================================
-  // Economic layoffs — business owners fire workers to cut costs
-  // Triggered when a business is unprofitable or owner's wealth is declining
-  // Runs every tick (small probability per struggling business)
-  // ============================================================
-  private processLayoffs(): void {
-    for (const wp of this.locations) {
-      if (wp.type !== 'workplace' || !wp.ownerId || wp.filledSlots === 0) continue
-
-      const owner = this.agents.find((a) => a.id === wp.ownerId)
-      if (!owner || owner.state !== 'business_owner') continue
-
-      // --- Economic layoff conditions ---
-      // Owner is struggling: business has been unprofitable OR owner wealth is negative
-      const isStrugglingBiz = owner.businessTicksUnprofitable > 4
-      const isOwnerInDebt = owner.wealth < 0
-      const highWageBill = wp.filledSlots * (wp.wage ?? 30) > owner.wealth * 0.5 && owner.wealth > 0
-
-      if (!isStrugglingBiz && !isOwnerInDebt && !highWageBill) continue
-
-      // Probability of laying off 1 worker this tick (higher if more desperate)
-      let layoffProb = 0.02
-      if (isOwnerInDebt) layoffProb += 0.06
-      if (isStrugglingBiz) layoffProb += 0.04
-      if (highWageBill) layoffProb += 0.02
-
-      if (this.rng() < layoffProb) {
-        // Fire the most expensive worker first (cost-cutting logic)
-        const workers = this.agents.filter(
-          (a) => a.workplaceId === wp.id && a.state === 'employed'
-        )
-        if (workers.length > 0) {
-          workers.sort((a, b) => b.income - a.income) // most expensive first
-          this.fireAgent(workers[0], 'economic_layoff')
-        }
-      }
-    }
-  }
 
   // ============================================================
   // Agent decision — choose where to go
@@ -1515,95 +1435,9 @@ export class SimulationEngine {
   }
 
   // ============================================================
-  // Economy processing — wages, expenses, satisfaction decay
+  // Economy system → extracted to systems/EconomySystem.ts
+  // Called via econProcessEconomy(ctx) in step()
   // ============================================================
-  private processEconomy(): void {
-    // Cache vacancy rate once (used by business creation guard inside loop)
-    const cachedVacancyRate = this.getVacancyRate()
-    for (const agent of this.agents) {
-      if (agent.state === 'dead' || agent.state === 'child') continue
-
-      // --- NO passive income/expense ---
-      // Wages are earned at workplace contact (agentInteract)
-      // Spending happens at market contact (agentInteract)
-      // Retired agents get pension at government contact (Tax Day)
-
-      // NO passive costs — all expenses are contact-based (market purchases)
-
-      // Satisfaction: state-dependent boosts/penalties, all decay gently
-      // All rates scaled by ticksPerYear so annual effect stays constant
-      const tpy = this.params.ticksPerYear
-      const satBoost = 0.18 / tpy     // employed: +0.18/year (net +0.06 after decay)
-      const satDecay = 0.12 / tpy      // base decay: -0.12/year
-      const unempDrain = 0.20 / tpy    // unemployed: -0.20/year additional (total -0.32/yr)
-      const sickDrain = 0.12 / tpy     // sick: -0.12/year additional
-
-      if (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police') {
-        agent.satisfaction = clamp(agent.satisfaction + satBoost, 0, 1)
-      } else if (agent.state === 'unemployed') {
-        // Unemployment is deeply dissatisfying
-        agent.satisfaction = clamp(agent.satisfaction - unempDrain, 0, 1)
-      } else if (agent.state === 'criminal') {
-        // Criminals have low life satisfaction
-        agent.satisfaction = clamp(agent.satisfaction - unempDrain * 1.5, 0, 1)
-      }
-      if (agent.isSick) {
-        agent.satisfaction = clamp(agent.satisfaction - sickDrain, 0, 1)
-      }
-      agent.satisfaction = clamp(agent.satisfaction - satDecay, 0, 1)
-      agent.ticksSinceConsumption++
-
-      // Need consumption?
-      if (agent.ticksSinceConsumption >= this.consumptionInterval) {
-        agent.needsConsumption = true
-      }
-
-      // --- Parent pays for children ---
-      // Adults with children at the same home pay a small per-child cost each consumption cycle
-      if (agent.needsConsumption && agent.children > 0) {
-        const childCostPerTick = 2 * agent.children / tpy // ~$2/child/year spread across ticks
-        agent.wealth -= childCostPerTick
-      }
-
-      // Floor wealth at a minimum (prevent extreme debt spiral)
-      agent.wealth = Math.max(agent.wealth, -500)
-
-      // Bankruptcy event
-      if (agent.wealth < BANKRUPTCY_THRESHOLD && agent.state !== 'retired') {
-        if (!agent.lifeEvents.some((e) => e.type === 'bankrupt' && e.tick > this.tick - 50)) {
-          agent.lifeEvents.push({
-            tick: this.tick,
-            type: 'bankrupt',
-            description: `Bankrupt (debt: $${Math.round(agent.wealth)})`,
-          })
-        }
-      }
-
-      // Business creation — wealthy + educated agents become entrepreneurs
-      // Guarded by vacancy rate: no new businesses if >10% of slots are already empty
-      // Business creation: suppressed by actual displacement (fewer opportunities in automated economy)
-      // Guard: only when vacancy < 10% AND displacement is not too high
-      const actualDisplacement = this.metrics.totalDisplacementRate
-      if (cachedVacancyRate < 0.10 && actualDisplacement < 0.60) {
-        const avgWealth = this.params.totalWealth / this.params.populationSize
-        const wealthThreshold = avgWealth * 1.2
-        const canEntrepreneurize =
-          (agent.state === 'employed' || agent.state === 'unemployed') &&
-          agent.ownedBusinessId === null &&
-          agent.wealth > wealthThreshold &&
-          (agent.education === 'high' || agent.education === 'medium') &&
-          agent.satisfaction > 0.35 &&
-          agent.creditScore > 0.3 &&
-          agent.age >= 25 && agent.age <= 60
-        // Annual rate ~4%, suppressed by displacement: at 30% displacement → halved
-        const annualBizRate = 0.04 * Math.max(0.1, 1 - actualDisplacement * 2)
-        const bizChance = annualBizRate / this.params.ticksPerYear
-        if (canEntrepreneurize && this.rng() < bizChance) {
-          this.createBusiness(agent)
-        }
-      }
-    }
-  }
 
   // ============================================================
   // Business creation by entrepreneurial agent
@@ -1730,130 +1564,9 @@ export class SimulationEngine {
   }
 
   // ============================================================
-  // Housing — rent, mortgage, ownership, government expansion
-  // Runs once per year (on year tick)
+  // Housing system → extracted to systems/HousingSystem.ts
+  // Called via housingProcessHousing(ctx) in step() annual block
   // ============================================================
-  private processHousing(): void {
-    // NOTE: called only from annual block in step(), no need for tick guard
-    const tpy = this.params.ticksPerYear
-
-    // --- 1. Recount residents per home ---
-    for (const loc of this.locations) {
-      if (loc.type === 'home') loc.residentsCount = 0
-    }
-    for (const agent of this.agents) {
-      if (agent.state === 'dead') continue
-      // Children share parent's home — don't double-count (only count head of household)
-      if (agent.state === 'child') continue
-      // Couples: only count alphabetically-first partner
-      if (agent.partnerId && agent.id > agent.partnerId) continue
-      const home = this.locations.find((l) => l.id === agent.homeId)
-      if (home) home.residentsCount = (home.residentsCount ?? 0) + 1
-    }
-
-    // --- 2. Process each adult agent's housing ---
-    for (const agent of this.agents) {
-      if (agent.state === 'dead' || agent.state === 'child') continue
-
-      const home = this.locations.find((l) => l.id === agent.homeId)
-      if (!home) continue
-
-      // Couples: only alphabetically-first partner pays (avoids double-charging)
-      if (agent.partnerId) {
-        const partner = this.agents.find((a) => a.id === agent.partnerId)
-        if (partner && agent.id > partner.id) continue
-      }
-
-      // --- 2a. Homeowner: no rent, no mortgage if paid off ---
-      if (agent.homeOwned && agent.homeDebt <= 0) {
-        // Owned home → satisfaction boost (stability) — scaled per year
-        agent.satisfaction = clamp(agent.satisfaction + 0.08 / tpy, 0, 1)
-        continue
-      }
-
-      // --- 2b. Mortgage payment ---
-      if (agent.homeDebt > 0 && agent.homeDebtPayment > 0) {
-        const annualPayment = agent.homeDebtPayment * tpy
-        const payment = Math.min(annualPayment, agent.homeDebt)
-
-        if (agent.partnerId) {
-          const partner = this.agents.find((a) => a.id === agent.partnerId)
-          agent.wealth -= payment / 2
-          if (partner) partner.wealth -= payment / 2
-        } else {
-          agent.wealth -= payment
-        }
-        agent.homeDebt -= payment
-
-        // Mortgage fully paid → agent owns the home!
-        if (agent.homeDebt <= 0) {
-          agent.homeDebt = 0
-          agent.homeDebtPayment = 0
-          agent.homeOwned = true
-          agent.creditScore = clamp(agent.creditScore + 0.1, 0, 1)
-          agent.satisfaction = clamp(agent.satisfaction + 0.2, 0, 1)
-          agent.lifeEvents.push({
-            tick: this.tick, type: 'mortgage_paid',
-            description: `Mortgage paid off! Now owns home (value: $${Math.round(agent.homeValue)})`,
-          })
-        }
-        continue
-      }
-
-      // --- 2c. Renter: pay annual rent ---
-      const rent = home.rent ?? 30
-      if (agent.partnerId) {
-        const partner = this.agents.find((a) => a.id === agent.partnerId)
-        agent.wealth -= rent / 2
-        if (partner) partner.wealth -= rent / 2
-      } else {
-        agent.wealth -= rent
-      }
-
-      // --- 2d. Can this renter afford to buy? Take mortgage ---
-      // Conditions: employed, good credit, enough wealth for down payment (20%)
-      const canBuy = !agent.homeOwned && agent.homeDebt <= 0 &&
-        (agent.state === 'employed' || agent.state === 'business_owner') &&
-        agent.creditScore > 0.4 &&
-        agent.wealth > agent.homeValue * 0.20 && // 20% down payment
-        agent.income > 0
-
-      if (canBuy && this.rng() < 0.15) {
-        const downPayment = agent.homeValue * 0.20
-        agent.wealth -= downPayment
-        agent.homeDebt = agent.homeValue - downPayment // 80% mortgage
-        // Repay over 15 years
-        const mortgageYears = 15
-        agent.homeDebtPayment = agent.homeDebt / (mortgageYears * tpy)
-        agent.lifeEvents.push({
-          tick: this.tick, type: 'home_bought',
-          description: `Bought home (value: $${Math.round(agent.homeValue)}, down: $${Math.round(downPayment)}, mortgage: $${Math.round(agent.homeDebt)})`,
-        })
-      }
-
-      // --- 2e. Eviction: can't afford rent ---
-      if (agent.wealth < -150) {
-        const allHomes = this.locations.filter((l) => l.type === 'home')
-        const cheapest = allHomes.reduce((best, h) =>
-          (h.rent ?? 30) < (best.rent ?? 30) ? h : best, allHomes[0])
-        if (cheapest && cheapest.id !== agent.homeId) {
-          agent.homeId = cheapest.id
-          agent.homeOwned = false
-          agent.homeDebt = 0
-          agent.homeDebtPayment = 0
-          agent.homeValue = cheapest.housingValue ?? 300
-          agent.satisfaction = clamp(agent.satisfaction - 0.15, 0, 1)
-          agent.lifeEvents.push({
-            tick: this.tick, type: 'evicted',
-            description: `Evicted — moved to cheaper home (rent: $${cheapest.rent ?? 30})`,
-          })
-        }
-      }
-    }
-
-    // --- 3. Government housing expansion: build new homes if shortage ---
-    this.expandHousingIfNeeded()
-  }
 
   // ============================================================
   // Government builds new homes when there's a housing shortage
@@ -1934,868 +1647,29 @@ export class SimulationEngine {
   }
 
   // ============================================================
-  // Family — married couples at home with high satisfaction can have babies
-  // Babies grow into new agents after ~18 years
-  // ============================================================
-  private processFamily(): void {
-    // Runs every tick — birth probability is per-tick (annual rate / ticksPerYear)
-    const baseBirthProb = 0.15 / this.params.ticksPerYear
-
-    // --- Economic stress factor: high unemployment suppresses fertility ---
-    // Real-world: fertility drops ~1% for each 1% rise in unemployment
-    // Here: at 50% unemployment → birth rate halved
-    const living = this.agents.filter(a => a.state !== 'dead' && a.state !== 'child')
-    const unemployedCount = living.filter(a => a.state === 'unemployed').length
-    const unemploymentRate = living.length > 0 ? unemployedCount / living.length : 0
-    const econStressFactor = Math.max(0.2, 1 - unemploymentRate)
-    const birthProbPerTick = baseBirthProb * econStressFactor
-
-    const newChildren: Agent[] = []
-
-    for (const agent of this.agents) {
-      if (agent.state === 'dead' || !agent.partnerId) continue
-      // Only process once per couple (alphabetically-first partner)
-      if (agent.id > agent.partnerId) continue
-
-      const partner = this.agents.find((a) => a.id === agent.partnerId)
-      if (!partner || partner.state === 'dead') continue
-
-      // Baby conditions: fertile age, limited children, and either employed or poor (desperate)
-      const coupleWealth = agent.wealth + partner.wealth
-      const isPoor = coupleWealth < 60
-      // Poor couples have children even when unhappy (lower satisfaction threshold)
-      const satThreshold = isPoor ? 0.20 : 0.55
-      const bothSatisfied = agent.satisfaction > satThreshold && partner.satisfaction > satThreshold
-      const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
-        || (partner.state === 'employed' || partner.state === 'business_owner' || partner.state === 'police')
-      // Poor/unemployed couples can also have children (no employment requirement)
-      const canHaveChild = atLeastOneEmployed || isPoor
-      const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
-      const notTooManyKids = isPoor ? agent.children < 6 : agent.children < 4
-
-      // --- Conception failure: probability increases with age, satisfaction, education, wealth ---
-      // Real-world demographic transition: richer, more educated, happier people have fewer children
-      // Age factor: fertility peaks at 25, drops sharply after 35
-      const avgAge = (agent.age + partner.age) / 2
-      const agePenalty = avgAge > 35 ? (avgAge - 35) * 0.04 : 0 // +4% failure per year over 35
-
-      // Education factor: high-edu couples have fewer children (demographic transition)
-      const eduScore = (e: string) => e === 'high' ? 0.9 : e === 'medium' ? 0.5 : 0.2
-      const coupleEdu = (eduScore(agent.education) + eduScore(partner.education)) / 2
-      const eduPenalty = coupleEdu * 0.35 // high-edu couple: +31% failure
-
-      // Wealth factor: wealthier couples delay/avoid children, poor couples have MORE
-      const wealthPenalty = coupleWealth > 200
-        ? Math.min(0.3, (coupleWealth - 200) * 0.001) // rich: up to +30% failure
-        : 0
-      // Poverty fertility boost: very poor couples have significantly higher birth rate
-      const povertyBoost = coupleWealth < 60
-        ? Math.min(0.4, (60 - coupleWealth) * 0.007) // poor: up to -40% failure (= more births)
-        : 0
-
-      // Satisfaction factor: very happy people are more career-focused, less urgency for kids
-      const avgSat = (agent.satisfaction + partner.satisfaction) / 2
-      const satPenalty = Math.max(0, (avgSat - 0.6) * 0.25) // above 0.6 sat → up to +10% failure
-
-      // Existing children penalty: each existing child reduces desire for more
-      const kidsPenalty = agent.children * 0.12 // +12% per existing child
-
-      const conceptionFailure = Math.min(0.85, agePenalty + eduPenalty + wealthPenalty + satPenalty + kidsPenalty - povertyBoost)
-      const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure))
-
-      if (bothSatisfied && canHaveChild && fertileAge && notTooManyKids && this.rng() < adjustedBirthProb) {
-        agent.children++
-        partner.children = agent.children // sync count
-
-        // --- Create a real child agent ---
-        const gender = this.rng() < 0.5 ? 'male' : 'female'
-        const home = this.locations.find((l) => l.id === agent.homeId)
-        const homePos = home?.position ?? agent.position
-        const scatter = (home?.radius ?? 3) * 1.5
-
-        const child: Agent = {
-          id: uid('child'),
-          position: { x: homePos.x + (this.rng() - 0.5) * scatter, y: homePos.y + (this.rng() - 0.5) * scatter },
-          velocity: { x: 0, y: 0 },
-          target: null,
-          targetLocationId: null,
-          age: 0,
-          gender: gender as 'male' | 'female',
-          education: 'low',
-          state: 'child',
-          wealth: 0,
-          income: 0,
-          tickEarnings: 0,
-          homeId: agent.homeId,
-          homeOwned: false,
-          homeDebt: 0,
-          homeDebtPayment: 0,
-          homeValue: home?.housingValue ?? 300,
-          partnerId: null,
-          children: 0,
-          workplaceId: null,
-          satisfaction: 0.7,
-          needsConsumption: false,
-          ticksUnemployed: 0,
-          ticksSinceConsumption: 0,
-          currentAction: 'resting',
-          stayTicksRemaining: 0,
-          isSick: false,
-          ticksSick: 0,
-          ticksLowSatisfaction: 0,
-          ticksAsCriminal: 0,
-          deathTick: null,
-          carryingResource: false,
-          lastPaidTick: -10,
-          loan: 0,
-          loanPayment: 0,
-          creditScore: 0.5,
-          ownedBusinessId: null,
-          businessDebt: 0,
-          businessDebtPayment: 0,
-          businessRevenue: 0,
-          businessTicksUnprofitable: 0,
-          ticksStudying: 0,
-          trail: [],
-          lifeEvents: [{
-            tick: this.tick,
-            type: 'born',
-            description: `Born to ${agent.gender === 'male' ? '👨' : '👩'}+${partner.gender === 'male' ? '👨' : '👩'} family`,
-          }],
-          wealthHistory: [0],
-        }
-
-        newChildren.push(child)
-
-        // Update home capacity tracking
-        if (home) {
-          home.residentsCount = (home.residentsCount ?? 0) + 1
-        }
-
-        agent.satisfaction = clamp(agent.satisfaction + 0.1, 0, 1)
-        partner.satisfaction = clamp(partner.satisfaction + 0.1, 0, 1)
-        agent.lifeEvents.push({ tick: this.tick, type: 'had_baby', description: `Had a baby (${agent.children} children)` })
-        partner.lifeEvents.push({ tick: this.tick, type: 'had_baby', description: `Had a baby (${agent.children} children)` })
-        this.tickBirths++
-      }
-    }
-
-    // Add all new children to the agent pool
-    if (newChildren.length > 0) {
-      this.agents.push(...newChildren)
-      // Check if housing expansion is needed after births
-      this.expandHousingIfNeeded()
-    }
-  }
-
-  // ============================================================
-  // Loan repayment + credit score update (runs every tick)
-  // ============================================================
-  private processLoans(): void {
-    for (const agent of this.agents) {
-      if (agent.state === 'dead') continue
-
-      // --- Loan repayment ---
-      if (agent.loan > 0 && agent.loanPayment > 0) {
-        const payment = Math.min(agent.loanPayment, agent.loan)
-        agent.wealth -= payment
-        agent.loan -= payment
-
-        // Loan fully repaid
-        if (agent.loan <= 0) {
-          agent.loan = 0
-          agent.loanPayment = 0
-          agent.creditScore = clamp(agent.creditScore + 0.05, 0, 1) // good repayment boosts score
-        }
-
-        // Default: can't afford payment and wealth too negative
-        if (agent.wealth < -300 && agent.loan > 0) {
-          agent.satisfaction = clamp(agent.satisfaction - 0.15, 0, 1)
-          agent.creditScore = clamp(agent.creditScore - 0.3, 0, 1) // credit score crash
-          agent.lifeEvents.push({
-            tick: this.tick, type: 'loan_default',
-            description: `Defaulted on loan (remaining: $${Math.round(agent.loan)})`,
-          })
-          // Debt remains but payments stop (written off partially)
-          agent.loanPayment = 0
-          agent.loan *= 0.5 // bank absorbs half
-        }
-      }
-
-      // --- Business debt repayment ---
-      if (agent.state === 'business_owner' && agent.businessDebt > 0 && agent.businessDebtPayment > 0) {
-        const bizPayment = Math.min(agent.businessDebtPayment, agent.businessDebt)
-        agent.wealth -= bizPayment
-        agent.businessDebt -= bizPayment
-
-        // Business debt fully repaid
-        if (agent.businessDebt <= 0) {
-          agent.businessDebt = 0
-          agent.businessDebtPayment = 0
-          agent.creditScore = clamp(agent.creditScore + 0.1, 0, 1)
-        }
-
-        // Track profitability: revenue vs debt payment
-        if (agent.businessRevenue < bizPayment) {
-          agent.businessTicksUnprofitable++
-        } else {
-          agent.businessTicksUnprofitable = Math.max(0, agent.businessTicksUnprofitable - 1)
-        }
-        // Reset revenue accumulator each tick
-        agent.businessRevenue = 0
-
-        // Bankruptcy: unprofitable for too long OR wealth too negative
-        // Higher automation = faster failure (1/10 survival rate at high automation)
-        const autoLevel = (this.params.aiGrowthRate + this.params.aiDiffusionRate) / 2
-        const bankruptcyYears = 2 - autoLevel * 1.2 // 2 years → 0.8 years at max automation
-        const bankruptcyThreshold = Math.max(this.params.ticksPerYear * 0.5, this.params.ticksPerYear * bankruptcyYears)
-        if (agent.businessTicksUnprofitable > bankruptcyThreshold || agent.wealth < -400) {
-          this.bankruptBusiness(agent)
-        }
-      }
-
-      // --- Credit score update (once per year) ---
-      if (this.tick % this.params.ticksPerYear === 0) {
-        let score = 0.3 // base
-        // Employment bonus
-        if (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police') score += 0.25
-        // Wealth bonus (scaled)
-        score += clamp(agent.wealth / 500, 0, 0.2)
-        // Income bonus
-        score += clamp(agent.income / 100, 0, 0.15)
-        // Penalty for existing debt
-        if (agent.loan > 0) score -= 0.1
-        // Age stability bonus
-        if (agent.age > 30) score += 0.05
-        // No default history bonus
-        if (!agent.lifeEvents.some((e) => e.type === 'loan_default')) score += 0.05
-        // Blend with existing score (momentum)
-        agent.creditScore = clamp(agent.creditScore * 0.6 + score * 0.4, 0, 1)
-      }
-    }
-  }
-
-  // ============================================================
-  // Causal societal phenomena — events are CAUSED by agent state,
-  // not random probabilities. Each phenomenon has a clear causal chain.
+  // Family system → extracted to systems/FamilySystem.ts
+  // Called via familyProcessFamily(ctx) in step()
   // ============================================================
 
-  // Thresholds for causal transitions
-  private static readonly CRIME_UNEMPLOYMENT_TICKS = 26  // ~6 months unemployed before crime risk
-  private static readonly CRIME_WEALTH_THRESHOLD = 30    // poverty line for crime trigger
-  private static readonly CRIME_SATISFACTION_THRESHOLD = 0.25
-  private static readonly DISEASE_POVERTY_TICKS = 6      // ticks in poverty before sickness
-  private static readonly DISEASE_WEALTH_THRESHOLD = 40
-  private static readonly DIVORCE_LOW_SAT_TICKS = 5      // sustained low satisfaction before divorce
-  private static readonly DIVORCE_SAT_THRESHOLD = 0.20
-  private static readonly MARRIAGE_SAT_THRESHOLD = 0.60
-  private static readonly REHAB_TICKS = 12               // ticks as criminal before possible rehabilitation
-  private static readonly DEATH_SICK_TICKS = 10          // ticks sick before death risk rises
-
-  private processCausalPhenomena(): void {
-    const N = this.agents.length
-    if (N === 0) return
-
-    for (const agent of this.agents) {
-      if (agent.state === 'dead' || agent.state === 'child') continue
-
-      // --- Track satisfaction trend ---
-      if (agent.satisfaction < SimulationEngine.DIVORCE_SAT_THRESHOLD) {
-        agent.ticksLowSatisfaction++
-      } else {
-        agent.ticksLowSatisfaction = Math.max(0, agent.ticksLowSatisfaction - 1)
-      }
-
-      // --- DISEASE (internal): caused by sustained poverty + low satisfaction ---
-      // Causal chain: poor for many ticks → body breaks down → sick
-      // NOTE: Disease can also SPREAD by proximity (see processProximityInteractions)
-      if (!agent.isSick && this.params.diseasesEnabled) {
-        const inPoverty = agent.wealth < SimulationEngine.DISEASE_WEALTH_THRESHOLD
-        const lowSat = agent.satisfaction < 0.35
-        if (inPoverty && lowSat && agent.ticksLowSatisfaction >= SimulationEngine.DISEASE_POVERTY_TICKS) {
-          const povertyDuration = agent.ticksLowSatisfaction - SimulationEngine.DISEASE_POVERTY_TICKS
-          if (this.rng() < 0.05 + povertyDuration * 0.02) {
-            agent.isSick = true
-            agent.ticksSick = 0
-            agent.satisfaction = clamp(agent.satisfaction - 0.15, 0, 1)
-            agent.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Fell ill (sustained poverty & stress)' })
-            this.tickDiseases++
-          }
-        }
-      } else if (agent.isSick) {
-        // Already sick — track duration, satisfaction decays
-        agent.ticksSick++
-        agent.satisfaction = clamp(agent.satisfaction - 0.03, 0, 1)
-        // NOTE: Recovery now requires visiting market/government (see agentInteract)
-        // Only wealthy agents who visit healthcare locations can recover
-      }
-
-      // --- PROLONGED UNEMPLOYMENT: multiple possible outcomes ---
-      // Not everyone turns to crime — diversified paths based on agent profile
-      if (agent.state === 'unemployed' && agent.ticksUnemployed >= SimulationEngine.CRIME_UNEMPLOYMENT_TICKS) {
-        const desperate = agent.wealth < SimulationEngine.CRIME_WEALTH_THRESHOLD
-          && agent.satisfaction < SimulationEngine.CRIME_SATISFACTION_THRESHOLD
-
-        if (desperate) {
-          const desperation = (agent.ticksUnemployed - SimulationEngine.CRIME_UNEMPLOYMENT_TICKS) * 0.02
-          const roll = this.rng()
-
-          if (roll < 0.03 + desperation * 0.4) {
-            // ~30% of desperate: CRIME — low-edu, young, no partner
-            if (agent.education === 'low' || (agent.age < 35 && !agent.partnerId)) {
-              agent.state = 'criminal'
-              agent.income = 0
-              agent.ticksAsCriminal = 0
-              agent.currentAction = 'stealing'
-              agent.lifeEvents.push({
-                tick: this.tick, type: 'became_criminal',
-                description: `Turned to crime after ${agent.ticksUnemployed} ticks of unemployment`,
-              })
-            }
-          } else if (roll < 0.05 + desperation * 0.3) {
-            // ~20% of desperate: DEPRESSION → sick (mental health crisis)
-            if (!agent.isSick) {
-              agent.isSick = true
-              agent.ticksSick = 0
-              agent.satisfaction = clamp(agent.satisfaction - 0.3, 0, 1)
-              agent.lifeEvents.push({
-                tick: this.tick, type: 'depression',
-                description: `Fell into depression after ${agent.ticksUnemployed} ticks of unemployment`,
-              })
-            }
-          } else if (roll < 0.06 + desperation * 0.2) {
-            // ~15% of desperate: SUICIDE — extreme despair, no partner, no wealth
-            if (agent.satisfaction < 0.10 && agent.wealth < -50 && !agent.partnerId) {
-              this.killAgent(agent, `Suicide after prolonged unemployment (${agent.ticksUnemployed} ticks)`)
-              this.tickPrematureDeaths++
-              continue
-            }
-          }
-          // Remaining ~35%: stay unemployed (resilient, waiting, informal economy)
-        }
-      }
-
-      // --- CRIMINAL: track time, risk of violent death ---
-      // NOTE: Stealing and rehabilitation are now proximity-based (see processProximityInteractions)
-      if (agent.state === 'criminal') {
-        agent.ticksAsCriminal++
-
-        // Risk of violent death for criminals (dangerous lifestyle)
-        if (this.rng() < 0.005 * (1 + agent.ticksAsCriminal * 0.1)) {
-          this.killAgent(agent, 'Died from criminal lifestyle (violence)')
-          continue
-        }
-      }
-
-      // --- PREMATURE DEATH: caused by prolonged sickness + poverty + age ---
-      if (this.params.diseasesEnabled && agent.isSick && agent.ticksSick >= SimulationEngine.DEATH_SICK_TICKS) {
-        const ageFactor = agent.age > 50 ? 0.03 : 0.005
-        const wealthFactor = agent.wealth < 0 ? 0.04 : 0.01
-        if (this.rng() < ageFactor + wealthFactor) {
-          this.killAgent(agent, `Premature death (sick ${agent.ticksSick} ticks, poverty)`)
-          continue
-        }
-      }
-
-      // --- DIVORCE (internal): caused by sustained low satisfaction ---
-      // Only married agents can divorce
-      if (agent.state !== 'criminal' && agent.partnerId) {
-        if (agent.ticksLowSatisfaction >= SimulationEngine.DIVORCE_LOW_SAT_TICKS && agent.age > 22) {
-          if (this.rng() < 0.02) {
-            this.tickDivorces++
-            // Break partner link
-            const partner = this.agents.find((a) => a.id === agent.partnerId)
-            if (partner) {
-              partner.partnerId = null
-              partner.satisfaction = clamp(partner.satisfaction - 0.15, 0, 1)
-              partner.lifeEvents.push({
-                tick: this.tick, type: 'divorced',
-                description: 'Divorced (partner\'s low satisfaction)',
-              })
-              // Partner gets a new home (loses ownership — stays with primary agent)
-              const homes = this.locations.filter((l) => l.type === 'home')
-              if (homes.length > 0) {
-                const newHome = homes.find((h) => (h.residentsCount ?? 0) < (h.maxResidents ?? 1))
-                  ?? homes[Math.floor(this.rng() * homes.length)]
-                partner.homeId = newHome.id
-                partner.homeOwned = false
-                partner.homeDebt = 0
-                partner.homeDebtPayment = 0
-                partner.homeValue = newHome.housingValue ?? 300
-              }
-            }
-            agent.partnerId = null
-            // Children stay with this agent
-            agent.wealth *= 0.7
-            agent.satisfaction = clamp(agent.satisfaction - 0.2, 0, 1)
-            agent.ticksLowSatisfaction = 0
-            agent.lifeEvents.push({
-              tick: this.tick, type: 'divorced',
-              description: `Divorced after ${SimulationEngine.DIVORCE_LOW_SAT_TICKS}+ ticks of low satisfaction`,
-            })
-
-            // --- Divorce suicide risk: 1/10 chance for each ex-partner ---
-            // Real-world: divorced individuals have significantly higher suicide rates
-            if (this.rng() < 0.10) {
-              agent.lifeEvents.push({
-                tick: this.tick, type: 'divorce_suicide',
-                description: 'Committed suicide following divorce',
-              })
-              this.killAgent(agent, 'Suicide following divorce')
-              this.tickPrematureDeaths++
-              continue
-            }
-            if (partner && partner.state !== 'dead' && this.rng() < 0.10) {
-              partner.lifeEvents.push({
-                tick: this.tick, type: 'divorce_suicide',
-                description: 'Committed suicide following divorce',
-              })
-              this.killAgent(partner, 'Suicide following divorce')
-              this.tickPrematureDeaths++
-            }
-          }
-        }
-      }
-
-      // --- MARRIAGE: now requires proximity encounter (see processProximityInteractions) ---
-      // No longer triggered by internal state alone
-    }
-  }
+  // ============================================================
+  // Loan system → extracted to systems/LoanSystem.ts
+  // Called via loanProcessLoans(ctx) in step()
+  // ============================================================
 
   // ============================================================
-  // Proximity-based interactions — social events require spatial encounter
-  // Agents within INTERACTION_RADIUS can interact. This replaces all
-  // "random target" mechanics with physically grounded encounters.
+  // Causal phenomena → extracted to systems/CausalPhenomenaSystem.ts
+  // Called via causalProcess(ctx) in step()
   // ============================================================
-  private processProximityInteractions(): void {
-    const living = this.agents.filter((a) => a.state !== 'dead')
-    const N = living.length
-    if (N < 2) return
-
-    // Build interaction pairs: check all pairs within INTERACTION_RADIUS
-    // O(N²) is fine for 200–500 agents (~50k checks, very fast)
-    for (let i = 0; i < N; i++) {
-      const a = living[i]
-      for (let j = i + 1; j < N; j++) {
-        const b = living[j]
-        const dist = vec2Distance(a.position, b.position)
-        if (dist > INTERACTION_RADIUS) continue
-
-        // --- POLICE ARREST: police near criminal → arrest ---
-        if (a.state === 'police' && b.state === 'criminal' && dist < CRIME_PROXIMITY_RADIUS) {
-          this.arrestCriminal(a, b)
-          continue
-        } else if (b.state === 'police' && a.state === 'criminal' && dist < CRIME_PROXIMITY_RADIUS) {
-          this.arrestCriminal(b, a)
-          continue
-        }
-
-        // --- CRIME: criminal near non-criminal → robbery ---
-        if (a.state === 'criminal' && b.state !== 'criminal' && b.state !== 'police' && dist < CRIME_PROXIMITY_RADIUS) {
-          this.attemptRobbery(a, b)
-        } else if (b.state === 'criminal' && a.state !== 'criminal' && a.state !== 'police' && dist < CRIME_PROXIMITY_RADIUS) {
-          this.attemptRobbery(b, a)
-        }
-
-        // --- DISEASE CONTAGION: sick agent near healthy → transmission risk ---
-        if (this.params.diseasesEnabled) {
-          if (a.isSick && !b.isSick && b.state !== 'dead') {
-            if (this.rng() < 0.04) { // 4% per-encounter transmission
-              b.isSick = true
-              b.ticksSick = 0
-              b.satisfaction = clamp(b.satisfaction - 0.1, 0, 1)
-              b.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Caught illness from nearby agent' })
-              this.tickDiseases++
-            }
-          } else if (b.isSick && !a.isSick && a.state !== 'dead') {
-            if (this.rng() < 0.04) {
-              a.isSick = true
-              a.ticksSick = 0
-              a.satisfaction = clamp(a.satisfaction - 0.1, 0, 1)
-              a.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Caught illness from nearby agent' })
-              this.tickDiseases++
-            }
-          }
-        }
-
-        // --- POLICE PRESENCE: nearby civilians feel slight surveillance pressure ---
-        // Less than crime impact, but perceptible — heavy policing erodes civil satisfaction
-        if (a.state === 'police' && b.state !== 'police' && b.state !== 'criminal' && b.state !== 'dead' && b.state !== 'child') {
-          b.satisfaction = clamp(b.satisfaction - 0.005, 0, 1)
-        } else if (b.state === 'police' && a.state !== 'police' && a.state !== 'criminal' && a.state !== 'dead' && a.state !== 'child') {
-          a.satisfaction = clamp(a.satisfaction - 0.005, 0, 1)
-        }
-
-        // --- CRIMINAL INFLUENCE: unemployed near criminal → faster radicalization ---
-        if (a.state === 'unemployed' && b.state === 'criminal') {
-          // Being near a criminal lowers satisfaction and accelerates desperation
-          a.satisfaction = clamp(a.satisfaction - 0.02, 0, 1)
-          a.ticksLowSatisfaction += 1 // counts double
-        } else if (b.state === 'unemployed' && a.state === 'criminal') {
-          b.satisfaction = clamp(b.satisfaction - 0.02, 0, 1)
-          b.ticksLowSatisfaction += 1
-        }
-
-        // --- WORD OF MOUTH: employed agent near unemployed → job tip ---
-        // Snap the unemployed agent directly to the workplace (same as sendToNearest pattern)
-        if (a.state === 'employed' && b.state === 'unemployed' && this.rng() < 0.15) {
-          const wp = this.locations.find((l) => l.id === a.workplaceId)
-          if (wp && wp.filledSlots < wp.jobSlots) {
-            b.position = { x: wp.position.x + (this.rng() - 0.5) * 2, y: wp.position.y + (this.rng() - 0.5) * 2 }
-            b.target = null
-            b.targetLocationId = wp.id
-            b.stayTicksRemaining = 1 // brief visit for interview
-            b.currentAction = 'job_seeking'
-            b.lifeEvents.push({ tick: this.tick, type: 'hired', description: 'Got a job tip from a fellow citizen' })
-          }
-        } else if (b.state === 'employed' && a.state === 'unemployed' && this.rng() < 0.15) {
-          const wp = this.locations.find((l) => l.id === b.workplaceId)
-          if (wp && wp.filledSlots < wp.jobSlots) {
-            a.position = { x: wp.position.x + (this.rng() - 0.5) * 2, y: wp.position.y + (this.rng() - 0.5) * 2 }
-            a.target = null
-            a.targetLocationId = wp.id
-            a.stayTicksRemaining = 1
-            a.currentAction = 'job_seeking'
-            a.lifeEvents.push({ tick: this.tick, type: 'hired', description: 'Got a job tip from a fellow citizen' })
-          }
-        }
-
-        // --- MARRIAGE: male + female, both single, both eligible, meet → potential marriage ---
-        // Demographic filters: educated women less likely to couple, poor men less likely to find partner
-        if (this.canMarry(a) && this.canMarry(b) && a.gender !== b.gender) {
-          const female = a.gender === 'female' ? a : b
-          const male = a.gender === 'male' ? a : b
-
-          // Female education penalty: high-edu women are more independent → less likely to couple
-          // low=0%, medium=15%, high=35% reduction
-          const femEduScore = female.education === 'high' ? 0.35 : female.education === 'medium' ? 0.15 : 0
-          const femEduFactor = 1 - femEduScore
-
-          // Male wealth penalty: poor men struggle to attract partners
-          // Below $50 wealth → up to 50% reduction; above $200 → no penalty
-          const maleWealthFactor = Math.min(1, Math.max(0.5, male.wealth / 200))
-
-          const marriageChance = 0.08 * femEduFactor * maleWealthFactor
-          if (this.rng() < marriageChance) {
-            this.tickMarriages++
-            a.partnerId = b.id
-            b.partnerId = a.id
-            // Second partner moves to first's home (shares housing status)
-            b.homeId = a.homeId
-            b.homeOwned = a.homeOwned
-            b.homeDebt = 0          // partner doesn't take on existing mortgage
-            b.homeDebtPayment = 0
-            b.homeValue = a.homeValue
-            a.satisfaction = clamp(a.satisfaction + 0.15, 0, 1)
-            b.satisfaction = clamp(b.satisfaction + 0.15, 0, 1)
-            a.lifeEvents.push({ tick: this.tick, type: 'married', description: `Married ${b.gender === 'male' ? '👨' : '👩'} partner` })
-            b.lifeEvents.push({ tick: this.tick, type: 'married', description: `Married ${a.gender === 'male' ? '👨' : '👩'} partner` })
-          }
-        }
-      }
-    }
-
-    // --- REHABILITATION: criminal near government/school → chance of rehab ---
-    for (const agent of living) {
-      if (agent.state !== 'criminal') continue
-      if (agent.ticksAsCriminal < SimulationEngine.REHAB_TICKS) continue
-
-      for (const loc of this.locations) {
-        if (loc.type !== 'government' && loc.type !== 'school') continue
-        if (vec2Distance(agent.position, loc.position) > loc.radius + 3) continue
-
-        // Near a rehabilitation location — chance to reform
-        if (agent.wealth > 30 && this.rng() < 0.12) {
-          agent.state = 'unemployed'
-          agent.ticksUnemployed = 0
-          agent.ticksAsCriminal = 0
-          agent.currentAction = 'idle'
-          agent.lifeEvents.push({
-            tick: this.tick, type: 'rehabilitated',
-            description: `Rehabilitated near ${loc.type} — re-entering society`,
-          })
-        }
-        break // only check closest qualifying location
-      }
-    }
-
-    // --- HEALTHCARE: sick agent at government → can recover if wealthy ---
-    for (const agent of living) {
-      if (!agent.isSick || agent.ticksSick < 4) continue
-
-      for (const loc of this.locations) {
-        if (loc.type !== 'government') continue
-        if (vec2Distance(agent.position, loc.position) > loc.radius + 2) continue
-
-        // At a government healthcare facility — can recover if can afford it
-        if (agent.wealth > 80 && this.rng() < 0.18) {
-          agent.isSick = false
-          agent.ticksSick = 0
-          agent.wealth -= 40 // healthcare cost
-          agent.lifeEvents.push({ tick: this.tick, type: 'disease', description: 'Recovered from illness (healthcare)' })
-        }
-        break
-      }
-    }
-  }
-
-  // --- Helper: attempt robbery (criminal → victim, must be in proximity) ---
-  private attemptRobbery(criminal: Agent, victim: Agent): void {
-    if (this.rng() > 0.5) return // not every encounter is a robbery
-
-    this.tickCrimes++
-    const stolen = Math.min(victim.wealth * 0.08, 80)
-    if (stolen > 0) {
-      victim.wealth -= stolen
-      criminal.wealth += stolen * 0.5 // some lost in process
-      criminal.lifeEvents.push({
-        tick: this.tick, type: 'crime_perpetrator',
-        description: `Stole $${Math.round(stolen)} from a nearby agent`,
-      })
-      victim.lifeEvents.push({
-        tick: this.tick, type: 'crime_victim',
-        description: `Robbed by criminal (-$${Math.round(stolen)})`,
-      })
-      victim.satisfaction = clamp(victim.satisfaction - 0.1, 0, 1)
-    }
-  }
-
-  // --- Helper: police arrests a criminal ---
-  private arrestCriminal(police: Agent, criminal: Agent): void {
-    if (this.rng() > 0.6) return // 60% arrest success rate per encounter
-
-    this.tickArrests++
-    // Criminal becomes unemployed (rehabilitation through arrest)
-    criminal.state = 'unemployed'
-    criminal.ticksAsCriminal = 0
-    criminal.ticksUnemployed = 0
-    criminal.currentAction = 'arrested'
-    criminal.satisfaction = clamp(criminal.satisfaction + 0.05, 0, 1) // slight hope
-    // Confiscate stolen wealth (partial)
-    const confiscated = Math.min(criminal.wealth * 0.3, 50)
-    criminal.wealth -= confiscated
-    this.governmentTreasury += confiscated // goes back to treasury
-
-    criminal.lifeEvents.push({
-      tick: this.tick, type: 'rehabilitated',
-      description: 'Arrested by police — returned to civilian life',
-    })
-    police.lifeEvents.push({
-      tick: this.tick, type: 'arrested_criminal',
-      description: `Arrested a criminal (confiscated $${Math.round(confiscated)})`,
-    })
-
-    // Send criminal home
-    this.sendToNearest(criminal, 'home')
-    criminal.stayTicksRemaining = 4 // detained at home for a few ticks
-  }
-
-  // --- Helper: can this agent get married? ---
-  private canMarry(agent: Agent): boolean {
-    return (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
-      && agent.partnerId === null
-      && agent.satisfaction >= SimulationEngine.MARRIAGE_SAT_THRESHOLD
-      && agent.age >= 20
-      && agent.ticksLowSatisfaction === 0
-  }
 
   // ============================================================
-  // Government — tax, fund pensions, police, infrastructure, UBI
-  // Budget flows through persistent governmentTreasury
+  // Proximity system → extracted to systems/ProximitySystem.ts
+  // Called via proximityProcess(ctx) in step()
   // ============================================================
-  private processGovernment(): void {
-    if (this.params.redistributionLevel <= 0) return
 
-    const living = this.agents.filter((a) => a.state !== 'dead')
-    const taxRate = this.params.redistributionLevel * 0.3 // max 30% tax
-    let taxPool = 0
-
-    // --- Collect taxes from agents who actually earned this tick ---
-    for (const agent of living) {
-      if (agent.tickEarnings > 0) {
-        const tax = agent.tickEarnings * taxRate
-        agent.wealth -= tax
-        taxPool += tax
-      }
-    }
-    this.tickTaxRevenue += taxPool
-    this.governmentTreasury += taxPool
-
-    // Helper: spend from treasury, never go below 0
-    const spend = (amount: number): number => {
-      const available = Math.max(0, this.governmentTreasury)
-      const actual = Math.min(amount, available)
-      this.governmentTreasury -= actual
-      return actual
-    }
-
-    // --- 1. Police salaries FIRST (fonctionnaires are priority — must be paid) ---
-    const policeAgents = living.filter((a) => a.state === 'police')
-    const policeSalary = 40
-    const totalPoliceCost = policeAgents.length * policeSalary
-    const policeFunded = spend(totalPoliceCost)
-    const actualPolicePay = policeAgents.length > 0 ? policeFunded / policeAgents.length : 0
-    for (const p of policeAgents) {
-      p.wealth += actualPolicePay
-      p.tickEarnings += actualPolicePay
-      p.income = actualPolicePay // actual pay, may be reduced if treasury short
-    }
-    this.tickGovExpPolice = policeFunded
-
-    // --- 2. Pensions (retired agents) ---
-    const retirees = living.filter((a) => a.state === 'retired')
-    const pensionPerRetiree = 12
-    const totalPensionCost = retirees.length * pensionPerRetiree
-    const pensionFunded = spend(totalPensionCost)
-    const actualPension = retirees.length > 0 ? pensionFunded / retirees.length : 0
-    for (const retiree of retirees) {
-      retiree.wealth += actualPension
-    }
-    this.tickRedistribution += pensionFunded
-    this.tickGovExpPensions = pensionFunded
-
-    // --- 3. Unemployment benefits ---
-    const unemployed = living.filter((a) => a.state === 'unemployed')
-    const benefitPerUnemployed = 5
-    const totalBenefitCost = unemployed.length * benefitPerUnemployed
-    const benefitFunded = spend(totalBenefitCost)
-    const actualBenefit = unemployed.length > 0 ? benefitFunded / unemployed.length : 0
-    for (const u of unemployed) {
-      u.wealth += actualBenefit
-    }
-    this.tickRedistribution += benefitFunded
-    this.tickGovExpBenefits = benefitFunded
-
-    // --- 4. Infrastructure maintenance ---
-    const infraCost = this.locations.length * 0.5
-    const infraSpent = spend(infraCost)
-    this.tickGovExpInfra = infraSpent
-
-    // --- 5. Dynamic police hiring/firing based on crime rate & dissatisfaction ---
-    this.processPoliceHiring(living)
-
-    // --- 6. Strikes: dissatisfied workers temporarily stop working ---
-    this.processStrikes(living)
-
-    // --- 7. Remaining surplus → UBI (only if enableUBI is on) ---
-    if (this.governmentTreasury > 0 && this.params.enableUBI) {
-      const ubiPool = this.governmentTreasury * 0.1
-      const ubiSpent = spend(ubiPool)
-      const ubi = ubiSpent / living.length
-      for (const agent of living) {
-        agent.wealth += ubi
-      }
-      this.tickRedistribution += ubiSpent
-      this.tickGovExpUBI = ubiSpent
-    }
-  }
-
-  // --- Police hiring: government recruits police based on crime level & social unrest ---
-  private processPoliceHiring(living: Agent[]): void {
-    const criminals = living.filter((a) => a.state === 'criminal').length
-    const police = living.filter((a) => a.state === 'police').length
-    const N = living.length
-    if (N === 0) return
-
-    // Target police ratio: scales with crime rate + dissatisfaction
-    const dissatisfied = living.filter(a =>
-      a.state !== 'child' && a.state !== 'dead' && a.satisfaction < 0.3
-    ).length
-    const dissatisfactionRate = dissatisfied / N
-
-    // Base: 1 police per 50 agents; increase with crime & dissatisfaction
-    const basePolice = Math.ceil(N / 50)
-    const crimeBonus = Math.ceil(criminals * 1.5) // 1.5 police per criminal
-    const unrestBonus = dissatisfactionRate > 0.4 ? Math.ceil(N * 0.03) : 0 // +3% if unrest
-    const targetPolice = basePolice + crimeBonus + unrestBonus
-
-    // Hire: recruit from unemployed
-    if (police < targetPolice) {
-      const toHire = Math.min(targetPolice - police, 2) // max 2 hires per tick
-      const candidates = living.filter(a =>
-        a.state === 'unemployed' && a.age >= 20 && a.age <= 50 && a.education === 'low'
-      )
-      for (let i = 0; i < toHire && i < candidates.length; i++) {
-        const recruit = candidates[i]
-        recruit.state = 'police'
-        recruit.income = 40
-        recruit.ticksUnemployed = 0
-        recruit.currentAction = 'patrolling'
-        recruit.workplaceId = null // police don't have a workplace — paid by government
-        recruit.lifeEvents.push({
-          tick: this.tick, type: 'joined_police',
-          description: 'Recruited into police force by government',
-        })
-        // Send to nearest police station
-        this.sendToNearest(recruit, 'police_station')
-      }
-    }
-
-    // Fire: if police force too large relative to need + treasury too low
-    if (police > targetPolice + 2 && this.governmentTreasury < 0) {
-      const toFire = Math.min(police - targetPolice, 1)
-      const policeList = living.filter(a => a.state === 'police')
-      for (let i = 0; i < toFire && i < policeList.length; i++) {
-        const officer = policeList[i]
-        officer.state = 'unemployed'
-        officer.income = 0
-        officer.ticksUnemployed = 0
-        officer.currentAction = 'idle'
-        officer.lifeEvents.push({
-          tick: this.tick, type: 'fired',
-          description: 'Laid off from police force (budget cuts)',
-        })
-      }
-    }
-
-    // Ensure at least 1 police station exists
-    const stations = this.locations.filter(l => l.type === 'police_station')
-    if (stations.length === 0) {
-      const gov = this.locations.find(l => l.type === 'government')
-      const pos = gov ? { x: gov.position.x + 8, y: gov.position.y + 3 } : { x: 0, y: 0 }
-      this.locations.push({
-        id: `police_station_${this.tick}`,
-        type: 'police_station',
-        position: pos,
-        radius: 2.5,
-        jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
-      })
-    }
-  }
-
-  // --- Strikes: widespread dissatisfaction causes workers to stop working ---
-  private processStrikes(living: Agent[]): void {
-    const adults = living.filter(a =>
-      a.state !== 'child' && a.state !== 'dead' && a.state !== 'retired'
-    )
-    if (adults.length === 0) return
-
-    const dissatisfied = adults.filter(a => a.satisfaction < 0.25).length
-    const dissatisfactionRate = dissatisfied / adults.length
-
-    // Strikes trigger when >35% of working-age adults are deeply dissatisfied
-    if (dissatisfactionRate < 0.35) return
-
-    // Strike probability scales with dissatisfaction beyond threshold
-    const strikeProbability = Math.min(0.3, (dissatisfactionRate - 0.35) * 2)
-
-    const employed = living.filter(a => a.state === 'employed')
-    let strikers = 0
-    for (const worker of employed) {
-      if (worker.satisfaction < 0.30 && this.rng() < strikeProbability) {
-        // Worker goes on strike this tick: no work, no earnings
-        worker.currentAction = 'striking'
-        worker.stayTicksRemaining = 0 // leave workplace
-        this.sendToNearest(worker, 'government') // protest at government
-        worker.lifeEvents.push({
-          tick: this.tick, type: 'went_on_strike',
-          description: `Went on strike (satisfaction: ${(worker.satisfaction * 100).toFixed(0)}%)`,
-        })
-        strikers++
-      }
-    }
-    this.tickStrikers = strikers
-  }
+  // ============================================================
+  // Government system → extracted to systems/GovernmentSystem.ts
+  // Called via processGovernment(ctx) in step()
+  // ============================================================
 
   // ============================================================
   // Update history & trails
@@ -2826,8 +1700,7 @@ export class SimulationEngine {
     const living = this.agents.filter((a) => a.state !== 'dead')
     const agents = living
     const N = agents.length
-    // Clamp wealth to 0 for Gini (negative values break the formula)
-    const wealths = agents.map((a) => Math.max(0, a.wealth))
+    // Use raw wealth for Gini (formula now supports negatives via absolute mean)
     const rawWealths = agents.map((a) => a.wealth)
     const incomes = agents.map((a) => a.income)
     const satisfactions = agents.map((a) => a.satisfaction)
@@ -2884,7 +1757,7 @@ export class SimulationEngine {
       childCount: children,
       criminalCount: criminals,
       policeCount: agents.filter((a) => a.state === 'police').length,
-      giniCoefficient: computeGiniFast(wealths),
+      giniCoefficient: computeGiniFast(rawWealths),
       medianWealth: median(rawWealths),
       meanWealth: totalWealth / N,
       top10WealthShare: totalWealth > 0 ? top10Wealth / totalWealth : 0,

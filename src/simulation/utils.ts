@@ -19,7 +19,8 @@ export type RNG = ReturnType<typeof createRNG>
 // ============================================================
 // Gini-based wealth distribution
 // Generate N wealth values with a target Gini coefficient
-// Uses a Pareto-like distribution scaled to target Gini
+// Uses power distribution X = U^k with binary search over k to hit target Gini.
+// k < 1 → more equal (Gini < 0.33), k = 1 → uniform (Gini ≈ 0.33), k > 1 → more unequal.
 // ============================================================
 export function generateWealthDistribution(
   count: number,
@@ -27,22 +28,29 @@ export function generateWealthDistribution(
   targetGini: number,
   rng: RNG,
 ): number[] {
-  // Use exponential distribution with shape parameter derived from Gini
-  // For exponential: Gini = 0.5, for uniform: Gini ≈ 0.33
-  // We use a power-law: Gini ≈ 1/(2*alpha - 1) for Pareto
-  // Invert: alpha ≈ (1 + 1/(2*Gini)) / 2 ... simplified approach:
-  
-  // Shape parameter: higher = more equal
-  const shape = Math.max(0.1, (1 - targetGini) * 3)
-  
-  const raw: number[] = []
-  for (let i = 0; i < count; i++) {
-    // Generate from power distribution
-    const u = rng()
-    raw.push(Math.pow(1 - u, -1 / shape) - 1)
+  const clampedGini = Math.max(0.02, Math.min(0.95, targetGini))
+
+  // Pre-generate uniform samples (reused across binary search iterations)
+  const uniforms: number[] = []
+  for (let i = 0; i < count; i++) uniforms.push(rng())
+
+  // Binary search for exponent k that produces target Gini
+  let lo = 0.01, hi = 80.0
+  let bestK = 1.0
+
+  for (let iter = 0; iter < 30; iter++) {
+    const mid = (lo + hi) / 2
+    const trial = uniforms.map((u) => Math.pow(u, mid))
+    const trialSum = trial.reduce((a, b) => a + b, 0)
+    const scaled = trial.map((v) => (v / trialSum) * totalWealth)
+    const g = computeGiniFast(scaled)
+    if (Math.abs(g - clampedGini) < 0.003) { bestK = mid; break }
+    // Higher k → higher Gini (more inequality)
+    if (g < clampedGini) { lo = mid } else { hi = mid }
+    bestK = mid
   }
-  
-  // Normalize to total wealth
+
+  const raw = uniforms.map((u) => Math.pow(u, bestK))
   const sum = raw.reduce((a, b) => a + b, 0)
   const scale = totalWealth / sum
   return raw.map((v) => Math.max(0, v * scale))
@@ -69,19 +77,26 @@ export function computeGini(values: number[]): number {
 
 // ============================================================
 // Fast approximate Gini (O(n log n) instead of O(n²))
+// Supports negative wealth via mean-absolute-difference formulation:
+//   G = Σ Σ |xi - xj| / (2 * n² * μ*)
+// where μ* = mean of absolute values (handles debt correctly).
+// When all values are non-negative this is equivalent to the standard formula.
 // ============================================================
 export function computeGiniFast(values: number[]): number {
   const n = values.length
   if (n === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
-  const mean = sorted.reduce((a, b) => a + b, 0) / n
-  if (mean === 0) return 0
-  
+  // Use absolute mean so negative wealth widens inequality (not compresses it)
+  const absMean = sorted.reduce((s, v) => s + Math.abs(v), 0) / n
+  if (absMean === 0) return 0
+
+  // Mean absolute difference via sorted-order trick:
+  // Σ|xi-xj| = 2 * Σ (2i - n - 1) * x_sorted[i]  (when sorted ascending)
   let numerator = 0
   for (let i = 0; i < n; i++) {
     numerator += (2 * (i + 1) - n - 1) * sorted[i]
   }
-  return numerator / (n * n * mean)
+  return Math.min(1, Math.max(0, numerator / (n * n * absMean)))
 }
 
 // ============================================================
