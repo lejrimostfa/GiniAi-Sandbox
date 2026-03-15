@@ -77,26 +77,31 @@ export function computeGini(values: number[]): number {
 
 // ============================================================
 // Fast approximate Gini (O(n log n) instead of O(n²))
-// Supports negative wealth via mean-absolute-difference formulation:
-//   G = Σ Σ |xi - xj| / (2 * n² * μ*)
-// where μ* = mean of absolute values (handles debt correctly).
-// When all values are non-negative this is equivalent to the standard formula.
+// Handles negative wealth via floor-shift: all values are shifted so that
+// the minimum becomes 0, then the standard Gini is computed.
+// This is the established econometric approach (Chen, Tsaur & Rhai 1982):
+//   shifted_i = x_i - min(x)   →   all shifted_i ≥ 0
+// Preserves relative differences and correctly reports high inequality when
+// most agents are in debt but a few are wealthy.
 // ============================================================
 export function computeGiniFast(values: number[]): number {
   const n = values.length
   if (n === 0) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  // Use absolute mean so negative wealth widens inequality (not compresses it)
-  const absMean = sorted.reduce((s, v) => s + Math.abs(v), 0) / n
-  if (absMean === 0) return 0
 
-  // Mean absolute difference via sorted-order trick:
-  // Σ|xi-xj| = 2 * Σ (2i - n - 1) * x_sorted[i]  (when sorted ascending)
+  // Floor-shift: translate so minimum wealth = 0
+  const minVal = Math.min(...values)
+  const shifted = minVal < 0 ? values.map((v) => v - minVal) : values
+  const sorted = [...shifted].sort((a, b) => a - b)
+
+  const mean = sorted.reduce((s, v) => s + v, 0) / n
+  if (mean === 0) return 0 // everyone is equal (all same value before shift)
+
+  // Standard sorted-order Gini: G = Σ (2i - n - 1) * x[i] / (n² * μ)
   let numerator = 0
   for (let i = 0; i < n; i++) {
     numerator += (2 * (i + 1) - n - 1) * sorted[i]
   }
-  return Math.min(1, Math.max(0, numerator / (n * n * absMean)))
+  return Math.min(1, Math.max(0, numerator / (n * n * mean)))
 }
 
 // ============================================================

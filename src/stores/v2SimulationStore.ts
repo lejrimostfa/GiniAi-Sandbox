@@ -185,20 +185,24 @@ export const useSimStore = defineStore('v2simulation', () => {
   }
 
   // --- 5. Agent Life Events (extracted for easy analysis) ---
-  /** Flattened list of all life events across all agents */
+  /** Flattened list of all life events across all agents, enriched with wealth context */
   function exportLifeEvents(): void {
     if (!worldState.value) return
-    const events: { agentId: string; age: number; state: string; education: string; tick: number; type: string; description: string }[] = []
+    const events: { agentId: string; age: number; gender: string; state: string; education: string; tick: number; type: string; description: string; wealthAtEvent: number | null }[] = []
     for (const agent of worldState.value.agents) {
       for (const evt of agent.lifeEvents) {
+        // Approximate wealth at time of event from wealthArchive
+        const archiveIdx = evt.tick < agent.wealthArchive.length ? evt.tick : null
         events.push({
           agentId: agent.id,
           age: agent.age,
+          gender: agent.gender,
           state: agent.state,
           education: agent.education,
           tick: evt.tick,
           type: evt.type,
           description: evt.description,
+          wealthAtEvent: archiveIdx !== null ? agent.wealthArchive[archiveIdx] : null,
         })
       }
     }
@@ -212,8 +216,8 @@ export const useSimStore = defineStore('v2simulation', () => {
     downloadJSON(data, buildFilename('giniai_life_events'))
   }
 
-  // --- 6. Wealth Distribution Snapshots ---
-  /** Per-agent wealth at current tick + wealth history arrays */
+  // --- 6. Wealth Distribution + Full History ---
+  /** Per-agent wealth: current state, full wealth archive (every tick), and state transitions */
   function exportWealthData(): void {
     if (!worldState.value) return
     const wealthSnapshot = worldState.value.agents.map(a => ({
@@ -229,9 +233,15 @@ export const useSimStore = defineStore('v2simulation', () => {
       creditScore: a.creditScore,
       loan: a.loan,
       businessDebt: a.businessDebt,
+      homeOwned: a.homeOwned,
+      homeDebt: a.homeDebt,
+      ownedBusinessId: a.ownedBusinessId,
       children: a.children,
       partnerId: a.partnerId,
-      wealthHistory: a.wealthHistory,
+      // Full uncapped wealth archive (one value per tick since agent creation)
+      wealthArchive: a.wealthArchive,
+      // State transition timeline (employed→unemployed→criminal, etc.)
+      stateHistory: a.stateHistory,
     }))
     const data = {
       exportType: 'wealth_data',
@@ -289,10 +299,15 @@ export const useSimStore = defineStore('v2simulation', () => {
       {
         filename: `${prefix}_life_events.json`,
         data: (() => {
-          const events: { agentId: string; tick: number; type: string; description: string }[] = []
+          const events: { agentId: string; age: number; gender: string; state: string; education: string; tick: number; type: string; description: string; wealthAtEvent: number | null }[] = []
           for (const agent of worldState.value!.agents) {
             for (const evt of agent.lifeEvents) {
-              events.push({ agentId: agent.id, tick: evt.tick, type: evt.type, description: evt.description })
+              const archiveIdx = evt.tick < agent.wealthArchive.length ? evt.tick : null
+              events.push({
+                agentId: agent.id, age: agent.age, gender: agent.gender, state: agent.state,
+                education: agent.education, tick: evt.tick, type: evt.type, description: evt.description,
+                wealthAtEvent: archiveIdx !== null ? agent.wealthArchive[archiveIdx] : null,
+              })
             }
           }
           events.sort((a, b) => a.tick - b.tick)
@@ -309,7 +324,9 @@ export const useSimStore = defineStore('v2simulation', () => {
             id: a.id, state: a.state, age: a.age, education: a.education, gender: a.gender,
             wealth: a.wealth, income: a.income, tickEarnings: a.tickEarnings, satisfaction: a.satisfaction,
             creditScore: a.creditScore, loan: a.loan, businessDebt: a.businessDebt,
-            children: a.children, partnerId: a.partnerId, wealthHistory: a.wealthHistory,
+            homeOwned: a.homeOwned, homeDebt: a.homeDebt, ownedBusinessId: a.ownedBusinessId,
+            children: a.children, partnerId: a.partnerId,
+            wealthArchive: a.wealthArchive, stateHistory: a.stateHistory,
           })),
         },
       },

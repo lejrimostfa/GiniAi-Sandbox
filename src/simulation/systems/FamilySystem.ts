@@ -145,6 +145,8 @@ export function processFamily(ctx: SimulationContext): void {
           description: `Born to ${agent.gender === 'male' ? '👨' : '👩'}+${partner.gender === 'male' ? '👨' : '👩'} family`,
         }],
         wealthHistory: [0],
+        wealthArchive: [0],
+        stateHistory: [{ tick: ctx.tick, from: 'child' as const, to: 'child' as const }],
       }
 
       newChildren.push(child)

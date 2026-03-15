@@ -105,7 +105,19 @@ export interface Agent {
   // --- Visual / history ---
   trail: Vec2[]           // recent positions (for trail rendering)
   lifeEvents: LifeEvent[] // log of major events
-  wealthHistory: number[] // wealth at each tick (for sparkline)
+  wealthHistory: number[] // wealth at each tick (for sparkline, capped at MAX_WEALTH_HISTORY)
+  // --- Full archives (uncapped, for export only) ---
+  wealthArchive: number[]          // wealth at every tick since agent's creation (never trimmed)
+  stateHistory: StateTransition[]  // log of every state change (for timeline reconstruction)
+}
+
+// ============================================================
+// State Transition (for agent timeline reconstruction)
+// ============================================================
+export interface StateTransition {
+  tick: number
+  from: AgentState
+  to: AgentState
 }
 
 // ============================================================

@@ -313,6 +313,8 @@ export function generateAgents(
         description: `Entered the economy (${gender}, edu: ${education}, wealth: $${Math.round(wealthValues[i])})`,
       }],
       wealthHistory: [wealthValues[i]],
+      wealthArchive: [wealthValues[i]],
+      stateHistory: [{ tick: 0, from: (isChild ? 'child' : 'unemployed') as Agent['state'], to: (isChild ? 'child' : 'unemployed') as Agent['state'] }],
     })
   }
 

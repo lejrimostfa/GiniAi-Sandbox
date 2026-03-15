@@ -776,6 +776,8 @@ export class SimulationEngine {
           description: `Immigrated (${gender}, edu: ${education})`,
         }],
         wealthHistory: [0],
+        wealthArchive: [0],
+        stateHistory: [{ tick: this.tick, from: 'unemployed' as const, to: 'unemployed' as const }],
       }
       this.agents.push(newAgent)
       this.tickBirths++
@@ -1684,10 +1686,21 @@ export class SimulationEngine {
         }
       }
 
-      // Wealth history
+      // Wealth history (capped sparkline)
       agent.wealthHistory.push(agent.wealth)
       if (agent.wealthHistory.length > MAX_WEALTH_HISTORY) {
         agent.wealthHistory.shift()
+      }
+
+      // Full wealth archive (uncapped, for export)
+      agent.wealthArchive.push(agent.wealth)
+
+      // State transition tracking (record every change)
+      const lastState = agent.stateHistory.length > 0
+        ? agent.stateHistory[agent.stateHistory.length - 1].to
+        : agent.state
+      if (agent.state !== lastState) {
+        agent.stateHistory.push({ tick: this.tick, from: lastState, to: agent.state })
       }
     }
   }
@@ -1774,11 +1787,26 @@ export class SimulationEngine {
       aiFiredWorkers: this.cumulativeAiFired,
       classTransitions: 0, // TODO: track state changes per tick if needed
       meanSatisfaction: satisfactions.reduce((a, b) => a + b, 0) / N,
-      gdp: agents.reduce((s, a) => s + a.tickEarnings, 0),
+      gdp: (() => {
+        // GDP = human production (wages) + automation production (robot/AI output)
+        // Automated slots produce value equivalent to the workplace wage — output doesn't vanish
+        // when humans are replaced, it just shifts from labor income to capital income.
+        const humanOutput = agents.reduce((s, a) => s + a.tickEarnings, 0)
+        const automationOutput = workplaces.reduce((s, wp) => {
+          const autoSlots = (wp.automatedSlots ?? 0) + (wp.aiDisplacedSlots ?? 0)
+          return s + autoSlots * (wp.wage ?? 30)
+        }, 0)
+        return humanOutput + automationOutput
+      })(),
       gdpPerCapita: (() => {
-        const workingAge = agents.filter(a => a.state !== 'child' && a.state !== 'retired').length
-        const totalEarnings = agents.reduce((s, a) => s + a.tickEarnings, 0)
-        return workingAge > 0 ? totalEarnings / workingAge : 0
+        const humanOutput = agents.reduce((s, a) => s + a.tickEarnings, 0)
+        const automationOutput = workplaces.reduce((s, wp) => {
+          const autoSlots = (wp.automatedSlots ?? 0) + (wp.aiDisplacedSlots ?? 0)
+          return s + autoSlots * (wp.wage ?? 30)
+        }, 0)
+        const totalOutput = humanOutput + automationOutput
+        const pop = agents.filter(a => a.state !== 'child' && a.state !== 'dead').length
+        return pop > 0 ? totalOutput / pop : 0
       })(),
       taxRevenue: this.tickTaxRevenue,
       redistributionPaid: this.tickRedistribution,

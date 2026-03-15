@@ -61,7 +61,7 @@ export function buildBatchPrefix(): string {
  * Keeps ALL analytical data: identity, state, economics, life events, wealth history.
  */
 export function sanitizeAgentForExport(agent: Record<string, unknown>): Record<string, unknown> {
-  const { trail, velocity, target, targetLocationId, needsConsumption, ticksSinceConsumption, ...rest } = agent
+  const { trail, velocity, target, targetLocationId, needsConsumption, ticksSinceConsumption, wealthArchive, ...rest } = agent
   return rest
 }
 
@@ -71,6 +71,15 @@ export function sanitizeAgentForExport(agent: Record<string, unknown>): Record<s
  */
 export function fullAgentExport(agent: Record<string, unknown>): Record<string, unknown> {
   const { trail, velocity, target, ...rest } = agent
+  return rest
+}
+
+/**
+ * Compact agent export for snapshots: strips rendering + large archive data.
+ * Use fullAgentExport() when you want the complete history.
+ */
+export function compactAgentExport(agent: Record<string, unknown>): Record<string, unknown> {
+  const { trail, velocity, target, wealthArchive, stateHistory, wealthHistory, ...rest } = agent
   return rest
 }
 
