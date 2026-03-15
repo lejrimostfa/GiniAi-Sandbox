@@ -2407,6 +2407,14 @@ export class SimulationEngine {
           }
         }
 
+        // --- POLICE PRESENCE: nearby civilians feel slight surveillance pressure ---
+        // Less than crime impact, but perceptible — heavy policing erodes civil satisfaction
+        if (a.state === 'police' && b.state !== 'police' && b.state !== 'criminal' && b.state !== 'dead' && b.state !== 'child') {
+          b.satisfaction = clamp(b.satisfaction - 0.005, 0, 1)
+        } else if (b.state === 'police' && a.state !== 'police' && a.state !== 'criminal' && a.state !== 'dead' && a.state !== 'child') {
+          a.satisfaction = clamp(a.satisfaction - 0.005, 0, 1)
+        }
+
         // --- CRIMINAL INFLUENCE: unemployed near criminal → faster radicalization ---
         if (a.state === 'unemployed' && b.state === 'criminal') {
           // Being near a criminal lowers satisfaction and accelerates desperation
@@ -2602,51 +2610,55 @@ export class SimulationEngine {
     this.tickTaxRevenue += taxPool
     this.governmentTreasury += taxPool
 
-    // --- 1. Fund pensions (retired agents get pension from tax pool) ---
+    // Helper: spend from treasury, never go below 0
+    const spend = (amount: number): number => {
+      const available = Math.max(0, this.governmentTreasury)
+      const actual = Math.min(amount, available)
+      this.governmentTreasury -= actual
+      return actual
+    }
+
+    // --- 1. Police salaries FIRST (fonctionnaires are priority — must be paid) ---
+    const policeAgents = living.filter((a) => a.state === 'police')
+    const policeSalary = 40
+    const totalPoliceCost = policeAgents.length * policeSalary
+    const policeFunded = spend(totalPoliceCost)
+    const actualPolicePay = policeAgents.length > 0 ? policeFunded / policeAgents.length : 0
+    for (const p of policeAgents) {
+      p.wealth += actualPolicePay
+      p.tickEarnings += actualPolicePay
+      p.income = actualPolicePay // actual pay, may be reduced if treasury short
+    }
+    this.tickGovExpPolice = policeFunded
+
+    // --- 2. Pensions (retired agents) ---
     const retirees = living.filter((a) => a.state === 'retired')
     const pensionPerRetiree = 12
     const totalPensionCost = retirees.length * pensionPerRetiree
-    const pensionFunded = Math.min(totalPensionCost, this.governmentTreasury * 0.4)
+    const pensionFunded = spend(totalPensionCost)
     const actualPension = retirees.length > 0 ? pensionFunded / retirees.length : 0
     for (const retiree of retirees) {
       retiree.wealth += actualPension
     }
     this.tickRedistribution += pensionFunded
-    this.governmentTreasury -= pensionFunded
     this.tickGovExpPensions = pensionFunded
-
-    // --- 2. Infrastructure maintenance ---
-    const infraCost = this.locations.length * 0.5
-    const infraSpent = Math.min(infraCost, Math.max(0, this.governmentTreasury) * 0.15)
-    this.governmentTreasury -= infraSpent
-    this.tickGovExpInfra = infraSpent
 
     // --- 3. Unemployment benefits ---
     const unemployed = living.filter((a) => a.state === 'unemployed')
     const benefitPerUnemployed = 5
     const totalBenefitCost = unemployed.length * benefitPerUnemployed
-    const benefitFunded = Math.min(totalBenefitCost, Math.max(0, this.governmentTreasury) * 0.25)
+    const benefitFunded = spend(totalBenefitCost)
     const actualBenefit = unemployed.length > 0 ? benefitFunded / unemployed.length : 0
     for (const u of unemployed) {
       u.wealth += actualBenefit
     }
     this.tickRedistribution += benefitFunded
-    this.governmentTreasury -= benefitFunded
     this.tickGovExpBenefits = benefitFunded
 
-    // --- 4. Police salaries (government-funded employment) ---
-    const policeAgents = living.filter((a) => a.state === 'police')
-    const policeSalary = 40 // per police agent per tick
-    const totalPoliceCost = policeAgents.length * policeSalary
-    const policeFunded = Math.min(totalPoliceCost, Math.max(0, this.governmentTreasury) * 0.3)
-    const actualPolicePay = policeAgents.length > 0 ? policeFunded / policeAgents.length : 0
-    for (const p of policeAgents) {
-      p.wealth += actualPolicePay
-      p.tickEarnings += actualPolicePay
-      p.income = policeSalary
-    }
-    this.governmentTreasury -= policeFunded
-    this.tickGovExpPolice = policeFunded
+    // --- 4. Infrastructure maintenance ---
+    const infraCost = this.locations.length * 0.5
+    const infraSpent = spend(infraCost)
+    this.tickGovExpInfra = infraSpent
 
     // --- 5. Dynamic police hiring/firing based on crime rate & dissatisfaction ---
     this.processPoliceHiring(living)
@@ -2656,14 +2668,14 @@ export class SimulationEngine {
 
     // --- 7. Remaining surplus → UBI (only if enableUBI is on) ---
     if (this.governmentTreasury > 0 && this.params.enableUBI) {
-      const ubiPool = this.governmentTreasury * 0.1 // spend 10% of treasury on UBI
-      const ubi = ubiPool / living.length
+      const ubiPool = this.governmentTreasury * 0.1
+      const ubiSpent = spend(ubiPool)
+      const ubi = ubiSpent / living.length
       for (const agent of living) {
         agent.wealth += ubi
       }
-      this.tickRedistribution += ubiPool
-      this.governmentTreasury -= ubiPool
-      this.tickGovExpUBI = ubiPool
+      this.tickRedistribution += ubiSpent
+      this.tickGovExpUBI = ubiSpent
     }
   }
 
