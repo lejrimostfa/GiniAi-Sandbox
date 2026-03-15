@@ -16,7 +16,7 @@ import {
 // ============================================================
 export function processFamily(ctx: SimulationContext): void {
   // Runs every tick — birth probability is per-tick (annual rate / ticksPerYear)
-  const baseBirthProb = 0.15 / ctx.params.ticksPerYear
+  const baseBirthProb = 0.20 / ctx.params.ticksPerYear
 
   // --- Economic stress factor: high unemployment suppresses fertility ---
   // Real-world: fertility drops ~1% for each 1% rise in unemployment
@@ -40,10 +40,8 @@ export function processFamily(ctx: SimulationContext): void {
     // Baby conditions: fertile age, limited children, and either employed or poor (desperate)
     const coupleWealth = agent.wealth + partner.wealth
     const isPoor = coupleWealth < POOR_COUPLE_WEALTH_THRESHOLD
-    const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
-      || (partner.state === 'employed' || partner.state === 'business_owner' || partner.state === 'police')
-    // Poor/unemployed couples can also have children (no employment requirement)
-    const canHaveChild = atLeastOneEmployed || isPoor
+    // Any couple can have children — employment and wealth affect probability, not eligibility
+    const canHaveChild = true
     const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
     const notTooManyKids = isPoor ? agent.children < ctx.config.poorMaxChildren : agent.children < ctx.config.normalMaxChildren
 
@@ -83,7 +81,7 @@ export function processFamily(ctx: SimulationContext): void {
     const conceptionFailure = Math.min(0.75, agePenalty + eduPenalty + wealthPenalty + kidsPenalty - povertyBoost)
     const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure)) * satFactor
     // Floor: even worst-case couple has ~5% annual chance (≈0.001/tick)
-    const floorProb = 0.05 / ctx.params.ticksPerYear
+    const floorProb = 0.08 / ctx.params.ticksPerYear
     const finalBirthProb = Math.max(floorProb, adjustedBirthProb)
 
     if (canHaveChild && fertileAge && notTooManyKids && ctx.rng() < finalBirthProb) {

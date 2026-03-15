@@ -128,7 +128,7 @@ export function processProximityInteractions(ctx: SimulationContext): void {
         // Below $50 wealth → up to 50% reduction; above $200 → no penalty
         const maleWealthFactor = Math.min(1, Math.max(0.5, male.wealth / 200))
 
-        const marriageChance = 0.08 * femEduFactor * maleWealthFactor
+        const marriageChance = 0.12 * femEduFactor * maleWealthFactor
         if (ctx.rng() < marriageChance) {
           ctx.tickMarriages++
           a.partnerId = b.id
@@ -243,9 +243,11 @@ function attemptRobbery(ctx: SimulationContext, criminal: Agent, victim: Agent):
 // Helper: can this agent get married?
 // ============================================================
 function canMarry(agent: Agent): boolean {
-  return (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
+  const eligibleState = agent.state === 'employed' || agent.state === 'business_owner'
+    || agent.state === 'police' || agent.state === 'unemployed'
+  return eligibleState
     && agent.partnerId === null
     && agent.satisfaction >= MARRIAGE_SAT_THRESHOLD
     && agent.age >= 20
-    && agent.ticksLowSatisfaction === 0
+    && agent.ticksLowSatisfaction < 4
 }

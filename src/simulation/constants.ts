@@ -35,7 +35,7 @@ export const DISEASE_POVERTY_TICKS = 6       // ticks in poverty before sickness
 export const DISEASE_WEALTH_THRESHOLD = 40
 export const DIVORCE_LOW_SAT_TICKS = 5       // sustained low satisfaction before divorce
 export const DIVORCE_SAT_THRESHOLD = 0.20
-export const MARRIAGE_SAT_THRESHOLD = 0.60
+export const MARRIAGE_SAT_THRESHOLD = 0.40
 export const REHAB_TICKS = 12                // ticks as criminal before possible rehabilitation
 export const DEATH_SICK_TICKS = 10           // ticks sick before death risk rises
 
