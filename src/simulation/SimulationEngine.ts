@@ -1960,12 +1960,18 @@ export class SimulationEngine {
       const partner = this.agents.find((a) => a.id === agent.partnerId)
       if (!partner || partner.state === 'dead') continue
 
-      // Baby conditions: at least one partner employed/business_owner, both satisfied, age 20-45, limited children
-      const bothSatisfied = agent.satisfaction > 0.55 && partner.satisfaction > 0.55
+      // Baby conditions: fertile age, limited children, and either employed or poor (desperate)
+      const coupleWealth = agent.wealth + partner.wealth
+      const isPoor = coupleWealth < 60
+      // Poor couples have children even when unhappy (lower satisfaction threshold)
+      const satThreshold = isPoor ? 0.20 : 0.55
+      const bothSatisfied = agent.satisfaction > satThreshold && partner.satisfaction > satThreshold
       const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
         || (partner.state === 'employed' || partner.state === 'business_owner' || partner.state === 'police')
+      // Poor/unemployed couples can also have children (no employment requirement)
+      const canHaveChild = atLeastOneEmployed || isPoor
       const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
-      const notTooManyKids = agent.children < 4
+      const notTooManyKids = isPoor ? agent.children < 6 : agent.children < 4
 
       // --- Conception failure: probability increases with age, satisfaction, education, wealth ---
       // Real-world demographic transition: richer, more educated, happier people have fewer children
@@ -1978,9 +1984,14 @@ export class SimulationEngine {
       const coupleEdu = (eduScore(agent.education) + eduScore(partner.education)) / 2
       const eduPenalty = coupleEdu * 0.35 // high-edu couple: +31% failure
 
-      // Wealth factor: wealthier couples delay/avoid children
-      const coupleWealth = agent.wealth + partner.wealth
-      const wealthPenalty = Math.min(0.3, Math.max(0, coupleWealth - 200) * 0.001) // caps at +30%
+      // Wealth factor: wealthier couples delay/avoid children, poor couples have MORE
+      const wealthPenalty = coupleWealth > 200
+        ? Math.min(0.3, (coupleWealth - 200) * 0.001) // rich: up to +30% failure
+        : 0
+      // Poverty fertility boost: very poor couples have significantly higher birth rate
+      const povertyBoost = coupleWealth < 60
+        ? Math.min(0.4, (60 - coupleWealth) * 0.007) // poor: up to -40% failure (= more births)
+        : 0
 
       // Satisfaction factor: very happy people are more career-focused, less urgency for kids
       const avgSat = (agent.satisfaction + partner.satisfaction) / 2
@@ -1989,10 +2000,10 @@ export class SimulationEngine {
       // Existing children penalty: each existing child reduces desire for more
       const kidsPenalty = agent.children * 0.12 // +12% per existing child
 
-      const conceptionFailure = Math.min(0.85, agePenalty + eduPenalty + wealthPenalty + satPenalty + kidsPenalty)
-      const adjustedBirthProb = birthProbPerTick * (1 - conceptionFailure)
+      const conceptionFailure = Math.min(0.85, agePenalty + eduPenalty + wealthPenalty + satPenalty + kidsPenalty - povertyBoost)
+      const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure))
 
-      if (bothSatisfied && atLeastOneEmployed && fertileAge && notTooManyKids && this.rng() < adjustedBirthProb) {
+      if (bothSatisfied && canHaveChild && fertileAge && notTooManyKids && this.rng() < adjustedBirthProb) {
         agent.children++
         partner.children = agent.children // sync count
 
