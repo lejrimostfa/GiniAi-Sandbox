@@ -40,9 +40,6 @@ export function processFamily(ctx: SimulationContext): void {
     // Baby conditions: fertile age, limited children, and either employed or poor (desperate)
     const coupleWealth = agent.wealth + partner.wealth
     const isPoor = coupleWealth < POOR_COUPLE_WEALTH_THRESHOLD
-    // Poor couples have children even when unhappy (lower satisfaction threshold)
-    const satThreshold = isPoor ? ctx.config.poorSatThreshold : ctx.config.normalSatThreshold
-    const bothSatisfied = agent.satisfaction > satThreshold && partner.satisfaction > satThreshold
     const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
       || (partner.state === 'employed' || partner.state === 'business_owner' || partner.state === 'police')
     // Poor/unemployed couples can also have children (no employment requirement)
@@ -58,9 +55,10 @@ export function processFamily(ctx: SimulationContext): void {
 
     // Education factor: WOMAN's education is the dominant driver of fertility reduction
     // Highly educated women delay/reduce childbearing (career focus, family planning)
+    // Low education = NO penalty (no demographic transition effect)
     const female = agent.gender === 'female' ? agent : partner
-    const femEduScore = female.education === 'high' ? 1.0 : female.education === 'medium' ? 0.4 : 0.1
-    const maleEduScore = (female === agent ? partner : agent).education === 'high' ? 0.3 : 0.1
+    const femEduScore = female.education === 'high' ? 1.0 : female.education === 'medium' ? 0.4 : 0.0
+    const maleEduScore = (female === agent ? partner : agent).education === 'high' ? 0.3 : 0.0
     const eduPenalty = (femEduScore * 0.45) + (maleEduScore * 0.10) // high-edu woman: +45% failure; man adds minor +3%
 
     // Wealth factor: wealthy couples delay/avoid children much more (career, lifestyle)
@@ -72,17 +70,23 @@ export function processFamily(ctx: SimulationContext): void {
       ? Math.min(ctx.config.povertyFertilityBoostMax, (POOR_COUPLE_WEALTH_THRESHOLD - coupleWealth) * 0.007) // poor: up to -40% failure (= more births)
       : 0
 
-    // Satisfaction factor: very happy people are more career-focused, less urgency for kids
+    // Satisfaction factor (continuous, replaces the old hard gate):
+    // Low satisfaction = instability/stress → reduces fertility
+    // High satisfaction = stable couple → no penalty (happy couples have babies)
     const avgSat = (agent.satisfaction + partner.satisfaction) / 2
-    const satPenalty = Math.max(0, (avgSat - 0.6) * 0.25) // above 0.6 sat → up to +10% failure
+    const satFactor = clamp(avgSat / 0.5, 0.15, 1.0)
+    // sat=0.1 → 0.30 (70% reduction), sat=0.3 → 0.60, sat=0.5+ → 1.0 (no penalty)
 
     // Existing children penalty: each existing child reduces desire for more
     const kidsPenalty = agent.children * 0.12 // +12% per existing child
 
-    const conceptionFailure = Math.min(0.85, agePenalty + eduPenalty + wealthPenalty + satPenalty + kidsPenalty - povertyBoost)
-    const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure))
+    const conceptionFailure = Math.min(0.75, agePenalty + eduPenalty + wealthPenalty + kidsPenalty - povertyBoost)
+    const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure)) * satFactor
+    // Floor: even worst-case couple has ~5% annual chance (≈0.001/tick)
+    const floorProb = 0.05 / ctx.params.ticksPerYear
+    const finalBirthProb = Math.max(floorProb, adjustedBirthProb)
 
-    if (bothSatisfied && canHaveChild && fertileAge && notTooManyKids && ctx.rng() < adjustedBirthProb) {
+    if (canHaveChild && fertileAge && notTooManyKids && ctx.rng() < finalBirthProb) {
       // --- Hospital check: births are safer with a hospital ---
       const hasHospital = ctx.locations.some((l) => l.type === 'hospital')
 

@@ -193,11 +193,14 @@ const showPanel = ref(false)
           <span class="adv-group__icon">{{ group.icon }}</span>
           <span class="adv-group__title">{{ group.title }}</span>
           <span class="adv-group__chevron" :class="{ open: expanded[group.id] }">▸</span>
-          <button
+          <span
             class="adv-group__reset"
+            role="button"
+            tabindex="0"
             @click.stop="resetGroup(group)"
+            @keydown.enter.stop="resetGroup(group)"
             title="Reset group"
-          >↺</button>
+          >↺</span>
         </button>
 
         <div v-if="expanded[group.id]" class="adv-group__sliders">
