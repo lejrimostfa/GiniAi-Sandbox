@@ -20,6 +20,7 @@ const tabs = [
   { id: 'wealth', label: 'Wealth' },
   { id: 'wealthDist', label: 'Distribution' },
   { id: 'ageDist', label: 'Age' },
+  { id: 'eduDist', label: 'Education' },
   { id: 'automation', label: 'Automation' },
   { id: 'gdp', label: 'GDP' },
   { id: 'government', label: 'Government' },
@@ -277,6 +278,74 @@ const ageDistOpts = computed<ChartOptions<'bar'>>(() => ({
   },
 }))
 
+// --- Education Distribution Bar chart ---
+const eduDistData = computed<ChartData<'bar'>>(() => {
+  const agents = sim.agents.filter(a => a.state !== 'dead')
+  const counts = { low: 0, medium: 0, high: 0 }
+  for (const a of agents) counts[a.education]++
+  const total = agents.length || 1
+  return {
+    labels: ['Low', 'Medium', 'High'],
+    datasets: [{
+      label: 'Agents',
+      data: [counts.low, counts.medium, counts.high],
+      backgroundColor: [
+        'rgba(212, 165, 116, 0.75)',  // low — amber
+        'rgba(129, 178, 154, 0.75)',  // medium — green
+        'rgba(100, 140, 230, 0.75)',  // high — blue
+      ],
+      borderWidth: 0,
+    }, {
+      label: '% of population',
+      data: [
+        Math.round(counts.low / total * 100),
+        Math.round(counts.medium / total * 100),
+        Math.round(counts.high / total * 100),
+      ],
+      backgroundColor: [
+        'rgba(212, 165, 116, 0.3)',
+        'rgba(129, 178, 154, 0.3)',
+        'rgba(100, 140, 230, 0.3)',
+      ],
+      borderWidth: 0,
+      hidden: true, // used only for tooltip
+    }],
+  }
+})
+const eduDistOpts = computed<ChartOptions<'bar'>>(() => ({
+  responsive: true, maintainAspectRatio: false,
+  animation: { duration: 0 },
+  plugins: {
+    zoom: ZOOM_OPTIONS,
+    title: { display: true, text: 'Education Distribution', color: CHART_COLORS.text, font: { size: 12, weight: 'bold' as const } },
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: 'rgba(26, 26, 46, 0.95)', titleColor: '#E8E8E8', bodyColor: '#A0A0B0',
+      callbacks: {
+        label: (item) => {
+          const agents = sim.agents.filter(a => a.state !== 'dead')
+          const total = agents.length || 1
+          const count = item.raw as number
+          const pct = Math.round(count / total * 100)
+          return `${count} agents (${pct}%)`
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      ticks: { color: CHART_COLORS.textMuted, font: { size: 10, family: 'monospace' } },
+      grid: { display: false },
+    },
+    y: {
+      title: { display: true, text: 'Number of Agents', color: CHART_COLORS.textMuted, font: { size: 10 } },
+      ticks: { color: CHART_COLORS.textMuted, font: { size: 9, family: 'monospace' } },
+      grid: { color: CHART_COLORS.grid },
+      beginAtZero: true,
+    },
+  },
+}))
+
 // --- Automation series config ---
 const autoSeriesConfig: SeriesDef[] = [
   { key: 'filledJobs', label: 'Filled Jobs', color: CHART_COLORS.worker, fill: CHART_COLORS.workerFill, accessor: m => m.filledJobs },
@@ -530,6 +599,7 @@ const empChart = ref<InstanceType<typeof Line> | null>(null)
 const wealthChart = ref<InstanceType<typeof Line> | null>(null)
 const wealthDistChart = ref<InstanceType<typeof Bar> | null>(null)
 const ageDistChart = ref<InstanceType<typeof Bar> | null>(null)
+const eduDistChart = ref<InstanceType<typeof Bar> | null>(null)
 const autoChart = ref<InstanceType<typeof Line> | null>(null)
 const gdpChart = ref<InstanceType<typeof Line> | null>(null)
 const govChart = ref<InstanceType<typeof Line> | null>(null)
@@ -541,7 +611,7 @@ const scatterChart = ref<InstanceType<typeof Scatter> | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chartRefs: Record<string, ReturnType<typeof ref<any>>> = {
   gini: giniChart, employment: empChart, wealth: wealthChart,
-  wealthDist: wealthDistChart, ageDist: ageDistChart, automation: autoChart, gdp: gdpChart,
+  wealthDist: wealthDistChart, ageDist: ageDistChart, eduDist: eduDistChart, automation: autoChart, gdp: gdpChart,
   government: govChart, satisfaction: satChart, societal: societalChart, housing: housingChart, scatter: scatterChart,
 }
 
@@ -624,6 +694,9 @@ watch(activeTab, () => {
 
       <!-- Age Distribution bar (single dataset, no toggles) -->
       <div v-show="activeTab === 'ageDist'" class="chart-wrap"><Bar ref="ageDistChart" :data="ageDistData" :options="ageDistOpts" /></div>
+
+      <!-- Education Distribution bar (single dataset, no toggles) -->
+      <div v-show="activeTab === 'eduDist'" class="chart-wrap"><Bar ref="eduDistChart" :data="eduDistData" :options="eduDistOpts" /></div>
 
       <!-- Automation (multi-series with toggles) -->
       <div v-show="activeTab === 'automation'" class="chart-wrap chart-wrap--toggled">

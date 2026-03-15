@@ -322,6 +322,7 @@ export interface BehaviorConfig {
   capitalReturnThreshold: number     // min wealth for capital returns
   passiveLivingCost: number          // $/tick base cost of living
   entrepreneurProb: number           // per-tick probability of starting a business
+  marketRevenueShare: number         // fraction of market spending routed to business owners (0–1)
   // --- Disease ---
   diseasePovertyTicks: number        // ticks in poverty before sickness
   diseaseWealthThreshold: number     // wealth below which disease risk rises
@@ -371,6 +372,7 @@ export const DEFAULT_BEHAVIOR_CONFIG: BehaviorConfig = {
   capitalReturnThreshold: 200,
   passiveLivingCost: 3,
   entrepreneurProb: 0.06,
+  marketRevenueShare: 0.60,
   // Disease
   diseasePovertyTicks: 6,
   diseaseWealthThreshold: 40,

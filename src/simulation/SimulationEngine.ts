@@ -106,6 +106,11 @@ export class SimulationEngine {
     return buf.reduce((a, b) => a + b, 0) / buf.length
   }
 
+  // --- Cached business owner index (rebuilt each tick before interactions) ---
+  // Each entry: { owner agent, total filledSlots across their businesses }
+  private bizOwnerCache: { owner: Agent; slots: number }[] = []
+  private bizOwnerTotalSlots = 0
+
   // --- Cumulative automation counters (survive workplace removal) ---
   // Total slots eliminated (empty + filled)
   private cumulativeAutomatedJobs = 0
@@ -343,7 +348,19 @@ export class SimulationEngine {
     // 5. Movement
     this.moveAgents()
 
-    // 6. Interactions (at locations)
+    // 6. Build business owner cache for market revenue distribution
+    this.bizOwnerCache = []
+    this.bizOwnerTotalSlots = 0
+    for (const a of this.agents) {
+      if (a.state !== 'business_owner' || !a.ownedBusinessId) continue
+      const biz = this.locations.find(l => l.id === a.ownedBusinessId)
+      if (!biz) continue
+      const slots = Math.max(1, biz.filledSlots) // min 1 so even empty businesses get some share
+      this.bizOwnerCache.push({ owner: a, slots })
+      this.bizOwnerTotalSlots += slots
+    }
+
+    // 6b. Interactions (at locations)
     for (const agent of this.agents) {
       if (agent.state === 'dead' || agent.state === 'prisoner') continue
       this.agentInteract(agent)
@@ -1525,6 +1542,7 @@ export class SimulationEngine {
     }
 
     // --- Market: consume, gain satisfaction (contact-based expense) ---
+    // A share of spending flows to business owners as revenue (demand → supply loop)
     if (loc.type === 'market' && agent.wealth > (loc.goodsPrice ?? 10)) {
       const cost = loc.goodsPrice ?? 10
       agent.wealth -= cost
@@ -1539,6 +1557,14 @@ export class SimulationEngine {
           amount: -Math.round(cost),
           tick: this.tick,
         })
+      }
+      // Distribute a share of spending to business owners (weighted by employee count)
+      const revenueShare = this.cfg.marketRevenueShare
+      if (revenueShare > 0 && this.bizOwnerTotalSlots > 0) {
+        const totalRevenue = cost * revenueShare
+        for (const entry of this.bizOwnerCache) {
+          entry.owner.businessRevenue += totalRevenue * (entry.slots / this.bizOwnerTotalSlots)
+        }
       }
     }
 

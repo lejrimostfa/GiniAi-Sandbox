@@ -83,24 +83,21 @@ export function processEconomy(ctx: SimulationContext): void {
       }
     }
 
-    // Business creation — wealthy + educated agents become entrepreneurs
-    // Guarded by vacancy rate: no new businesses if >10% of slots are already empty
-    // Business creation: suppressed by actual displacement (fewer opportunities in automated economy)
-    // Guard: only when vacancy < 10% AND displacement is not too high
+    // Business creation — agents with enough capital become entrepreneurs
+    // Guarded by vacancy rate and displacement (macro-level guards)
     const actualDisplacement = ctx.totalDisplacementRate
-    if (cachedVacancyRate < 0.10 && actualDisplacement < 0.60) {
+    if (cachedVacancyRate < 0.15 && actualDisplacement < 0.75) {
       const avgWealth = ctx.params.totalWealth / ctx.params.populationSize
-      const wealthThreshold = avgWealth * 1.2
+      const wealthThreshold = avgWealth * 0.7
       const canEntrepreneurize =
         (agent.state === 'employed' || agent.state === 'unemployed') &&
         agent.ownedBusinessId === null &&
         agent.wealth > wealthThreshold &&
-        (agent.education === 'high' || agent.education === 'medium') &&
-        agent.satisfaction > 0.35 &&
-        agent.creditScore > 0.3 &&
-        agent.age >= 25 && agent.age <= 60
-      // Annual rate ~4%, suppressed by displacement: at 30% displacement → halved
-      const annualBizRate = 0.04 * Math.max(0.1, 1 - actualDisplacement * 2)
+        agent.satisfaction > 0.25 &&
+        agent.creditScore > 0.2 &&
+        agent.age >= 22 && agent.age <= 62
+      // Annual rate ~7%, suppressed by displacement: at 30% displacement → halved
+      const annualBizRate = 0.07 * Math.max(0.1, 1 - actualDisplacement * 2)
       const bizChance = annualBizRate / ctx.params.ticksPerYear
       if (canEntrepreneurize && ctx.rng() < bizChance) {
         ctx.createBusiness(agent)

@@ -40,6 +40,7 @@ interface SliderDef {
   max: number
   step: number
   unit?: string
+  hint?: [string, string] // [left label, right label] — directional effect
 }
 
 interface GroupDef {
@@ -53,87 +54,88 @@ const groups: GroupDef[] = [
   {
     id: 'crime', icon: '🥷', title: 'Crime',
     sliders: [
-      { key: 'crimeUnemploymentTicks', label: 'Unemployment ticks before crime', min: 4, max: 104, step: 1, unit: 'ticks' },
-      { key: 'crimeWealthThreshold', label: 'Poverty threshold', min: 5, max: 100, step: 1, unit: '$' },
-      { key: 'crimeSatisfactionThreshold', label: 'Satisfaction threshold', min: 0.05, max: 0.60, step: 0.01 },
-      { key: 'crimeSuccessBaseProb', label: 'Robbery success rate', min: 0.05, max: 0.80, step: 0.01 },
-      { key: 'crimeAttemptCooldown', label: 'Attempt cooldown', min: 1, max: 20, step: 1, unit: 'ticks' },
+      { key: 'crimeUnemploymentTicks', label: 'Unemployment ticks before crime', min: 4, max: 104, step: 1, unit: 'ticks', hint: ['crime sooner', 'crime later'] },
+      { key: 'crimeWealthThreshold', label: 'Poverty threshold', min: 5, max: 100, step: 1, unit: '$', hint: ['less crime', 'more crime'] },
+      { key: 'crimeSatisfactionThreshold', label: 'Satisfaction threshold', min: 0.05, max: 0.60, step: 0.01, hint: ['less crime', 'more crime'] },
+      { key: 'crimeSuccessBaseProb', label: 'Robbery success rate', min: 0.05, max: 0.80, step: 0.01, hint: ['safer streets', 'more theft'] },
+      { key: 'crimeAttemptCooldown', label: 'Attempt cooldown', min: 1, max: 20, step: 1, unit: 'ticks', hint: ['frequent crime', 'rare crime'] },
     ],
   },
   {
     id: 'prison', icon: '🔒', title: 'Prison',
     sliders: [
-      { key: 'prisonSentenceMin', label: 'Min sentence', min: 1, max: 52, step: 1, unit: 'weeks' },
-      { key: 'prisonSentenceMax', label: 'Max sentence', min: 4, max: 156, step: 1, unit: 'weeks' },
-      { key: 'prisonCostPerPrisoner', label: 'Cost per prisoner', min: 1, max: 30, step: 1, unit: '$/tick' },
+      { key: 'prisonSentenceMin', label: 'Min sentence', min: 1, max: 52, step: 1, unit: 'weeks', hint: ['quick release', 'long stay'] },
+      { key: 'prisonSentenceMax', label: 'Max sentence', min: 4, max: 156, step: 1, unit: 'weeks', hint: ['lenient', 'harsh'] },
+      { key: 'prisonCostPerPrisoner', label: 'Cost per prisoner', min: 1, max: 30, step: 1, unit: '$/tick', hint: ['cheap', 'expensive'] },
     ],
   },
   {
     id: 'police', icon: '👮', title: 'Police',
     sliders: [
-      { key: 'policeBaseRatio', label: 'Base ratio (1 per N)', min: 10, max: 200, step: 5 },
-      { key: 'arrestSuccessRate', label: 'Arrest success rate', min: 0.1, max: 1.0, step: 0.05 },
-      { key: 'policeDeterrentRadius', label: 'Deterrent radius', min: 2, max: 30, step: 1 },
-      { key: 'policeDeterrentFactor', label: 'Deterrent factor', min: 0.1, max: 0.9, step: 0.05 },
+      { key: 'policeBaseRatio', label: 'Base ratio (1 per N)', min: 10, max: 200, step: 5, hint: ['more police', 'fewer police'] },
+      { key: 'arrestSuccessRate', label: 'Arrest success rate', min: 0.1, max: 1.0, step: 0.05, hint: ['ineffective', 'effective'] },
+      { key: 'policeDeterrentRadius', label: 'Deterrent radius', min: 2, max: 30, step: 1, hint: ['small zone', 'wide zone'] },
+      { key: 'policeDeterrentFactor', label: 'Deterrent factor', min: 0.1, max: 0.9, step: 0.05, hint: ['strong deterrent', 'weak deterrent'] },
     ],
   },
   {
     id: 'hospital', icon: '🏥', title: 'Hospital',
     sliders: [
-      { key: 'hospitalBirthCost', label: 'Birth cost (gov)', min: 5, max: 80, step: 1, unit: '$' },
-      { key: 'hospitalTreatmentCost', label: 'Treatment cost', min: 2, max: 50, step: 1, unit: '$' },
-      { key: 'hospitalMaintenanceCost', label: 'Maintenance cost', min: 1, max: 20, step: 1, unit: '$/tick' },
-      { key: 'hospitalRecoveryProb', label: 'Recovery probability', min: 0.05, max: 0.80, step: 0.01 },
-      { key: 'hospitalBirthMortalityNoHospital', label: 'Birth mortality (no hospital)', min: 0.0, max: 0.30, step: 0.01 },
+      { key: 'hospitalBirthCost', label: 'Birth cost (gov)', min: 5, max: 80, step: 1, unit: '$', hint: ['cheap births', 'costly births'] },
+      { key: 'hospitalTreatmentCost', label: 'Treatment cost', min: 2, max: 50, step: 1, unit: '$', hint: ['cheap care', 'costly care'] },
+      { key: 'hospitalMaintenanceCost', label: 'Maintenance cost', min: 1, max: 20, step: 1, unit: '$/tick', hint: ['low upkeep', 'high upkeep'] },
+      { key: 'hospitalRecoveryProb', label: 'Recovery probability', min: 0.05, max: 0.80, step: 0.01, hint: ['slow recovery', 'fast recovery'] },
+      { key: 'hospitalBirthMortalityNoHospital', label: 'Birth mortality (no hospital)', min: 0.0, max: 0.30, step: 0.01, hint: ['safe births', 'risky births'] },
     ],
   },
   {
     id: 'amusement', icon: '🎡', title: 'Amusement Park',
     sliders: [
-      { key: 'amusementParkEntryCost', label: 'Entry cost', min: 1, max: 30, step: 1, unit: '$' },
-      { key: 'amusementParkSatBoost', label: 'Satisfaction boost', min: 0.01, max: 0.40, step: 0.01 },
-      { key: 'amusementParkVisitProb', label: 'Visit probability', min: 0.01, max: 0.40, step: 0.01 },
+      { key: 'amusementParkEntryCost', label: 'Entry cost', min: 1, max: 30, step: 1, unit: '$', hint: ['affordable', 'expensive'] },
+      { key: 'amusementParkSatBoost', label: 'Satisfaction boost', min: 0.01, max: 0.40, step: 0.01, hint: ['small boost', 'big boost'] },
+      { key: 'amusementParkVisitProb', label: 'Visit probability', min: 0.01, max: 0.40, step: 0.01, hint: ['rare visits', 'frequent visits'] },
     ],
   },
   {
     id: 'family', icon: '👨‍👩‍👧', title: 'Family & Fertility',
     sliders: [
-      { key: 'normalSatThreshold', label: 'Satisfaction for conception', min: 0.1, max: 0.9, step: 0.01 },
-      { key: 'poorSatThreshold', label: 'Poor couple threshold', min: 0.05, max: 0.5, step: 0.01 },
-      { key: 'normalMaxChildren', label: 'Max children (normal)', min: 1, max: 10, step: 1 },
-      { key: 'poorMaxChildren', label: 'Max children (poor)', min: 1, max: 12, step: 1 },
-      { key: 'povertyFertilityBoostMax', label: 'Poverty fertility boost', min: 0.0, max: 0.8, step: 0.01 },
+      { key: 'normalSatThreshold', label: 'Satisfaction for conception', min: 0.1, max: 0.9, step: 0.01, hint: ['more births', 'fewer births'] },
+      { key: 'poorSatThreshold', label: 'Poor couple threshold', min: 0.05, max: 0.5, step: 0.01, hint: ['more poor births', 'fewer poor births'] },
+      { key: 'normalMaxChildren', label: 'Max children (normal)', min: 1, max: 10, step: 1, hint: ['small families', 'large families'] },
+      { key: 'poorMaxChildren', label: 'Max children (poor)', min: 1, max: 12, step: 1, hint: ['small families', 'large families'] },
+      { key: 'povertyFertilityBoostMax', label: 'Poverty fertility boost', min: 0.0, max: 0.8, step: 0.01, hint: ['no boost', 'high fertility boost'] },
     ],
   },
   {
     id: 'housing', icon: '🏠', title: 'Housing',
     sliders: [
-      { key: 'apartmentRentRatio', label: 'Apartment rent ratio', min: 0.01, max: 0.10, step: 0.005 },
-      { key: 'houseRentRatio', label: 'House rent ratio', min: 0.01, max: 0.15, step: 0.005 },
+      { key: 'apartmentRentRatio', label: 'Apartment rent ratio', min: 0.01, max: 0.10, step: 0.005, hint: ['cheap rent', 'costly rent'] },
+      { key: 'houseRentRatio', label: 'House rent ratio', min: 0.01, max: 0.15, step: 0.005, hint: ['cheap rent', 'costly rent'] },
     ],
   },
   {
     id: 'strikes', icon: '✊', title: 'Strikes',
     sliders: [
-      { key: 'strikeDissatisfactionThreshold', label: 'Dissatisfaction threshold', min: 0.10, max: 0.80, step: 0.01 },
-      { key: 'strikeBaseProbability', label: 'Base probability', min: 0.01, max: 0.50, step: 0.01 },
+      { key: 'strikeDissatisfactionThreshold', label: 'Dissatisfaction threshold', min: 0.10, max: 0.80, step: 0.01, hint: ['more strikes', 'fewer strikes'] },
+      { key: 'strikeBaseProbability', label: 'Base probability', min: 0.01, max: 0.50, step: 0.01, hint: ['rare strikes', 'frequent strikes'] },
     ],
   },
   {
     id: 'economy', icon: '💰', title: 'Economy',
     sliders: [
-      { key: 'capitalReturnRate', label: 'Capital return rate (r)', min: 0.0, max: 0.15, step: 0.005 },
-      { key: 'capitalReturnThreshold', label: 'Capital threshold', min: 50, max: 500, step: 10, unit: '$' },
-      { key: 'passiveLivingCost', label: 'Living cost', min: 0, max: 15, step: 0.5, unit: '$/tick' },
-      { key: 'entrepreneurProb', label: 'Entrepreneur probability', min: 0.01, max: 0.20, step: 0.01 },
+      { key: 'capitalReturnRate', label: 'Capital return rate (r)', min: 0.0, max: 0.15, step: 0.005, hint: ['less inequality', 'more inequality'] },
+      { key: 'capitalReturnThreshold', label: 'Capital threshold', min: 50, max: 500, step: 10, unit: '$', hint: ['more benefit', 'only rich benefit'] },
+      { key: 'passiveLivingCost', label: 'Living cost', min: 0, max: 15, step: 0.5, unit: '$/tick', hint: ['cheaper life', 'expensive life'] },
+      { key: 'entrepreneurProb', label: 'Entrepreneur probability', min: 0.01, max: 0.20, step: 0.01, hint: ['few businesses', 'many businesses'] },
+      { key: 'marketRevenueShare', label: 'Market → Business revenue', min: 0.0, max: 1.0, step: 0.05, hint: ['no demand loop', 'full demand loop'] },
     ],
   },
   {
     id: 'disease', icon: '🦠', title: 'Disease',
     sliders: [
-      { key: 'diseasePovertyTicks', label: 'Poverty ticks before sick', min: 1, max: 30, step: 1, unit: 'ticks' },
-      { key: 'diseaseWealthThreshold', label: 'Wealth threshold', min: 10, max: 100, step: 5, unit: '$' },
-      { key: 'deathSickTicks', label: 'Sick ticks before death risk', min: 2, max: 40, step: 1, unit: 'ticks' },
+      { key: 'diseasePovertyTicks', label: 'Poverty ticks before sick', min: 1, max: 30, step: 1, unit: 'ticks', hint: ['sick fast', 'sick slow'] },
+      { key: 'diseaseWealthThreshold', label: 'Wealth threshold', min: 10, max: 100, step: 5, unit: '$', hint: ['less disease', 'more disease'] },
+      { key: 'deathSickTicks', label: 'Sick ticks before death risk', min: 2, max: 40, step: 1, unit: 'ticks', hint: ['die fast', 'survive longer'] },
     ],
   },
 ]
@@ -219,6 +221,10 @@ const showPanel = ref(false)
               :step="s.step"
               v-model.number="config[s.key]"
             />
+            <div v-if="s.hint" class="adv-slider__hint">
+              <span class="adv-slider__hint-left">◀ {{ s.hint[0] }}</span>
+              <span class="adv-slider__hint-right">{{ s.hint[1] }} ▶</span>
+            </div>
           </div>
         </div>
       </div>
@@ -368,6 +374,22 @@ const showPanel = ref(false)
     font-size: 9px;
     color: $text-muted;
     margin-left: 2px;
+  }
+
+  &__hint {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8px;
+    color: $text-muted;
+    opacity: 0.6;
+    margin-top: -1px;
+    padding: 0 2px;
+    user-select: none;
+  }
+
+  &__hint-left,
+  &__hint-right {
+    white-space: nowrap;
   }
 
   &__input {
