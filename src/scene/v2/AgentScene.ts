@@ -20,6 +20,8 @@ function agentEmoji(state: AgentState, action: AgentAction, gender: Gender): str
   if (state === 'child') return isFemale ? '👧' : '👦'
   // Criminal
   if (state === 'criminal') return '🥷'
+  // Police
+  if (state === 'police') return '👮'
   // Retired
   if (state === 'retired') return isFemale ? '👵' : '👴'
   // Business owner
@@ -35,6 +37,9 @@ function agentEmoji(state: AgentState, action: AgentAction, gender: Gender): str
     case 'resting':     return isFemale ? '🧎‍♀️' : '🧎'
     case 'stealing':    return '🥷'
     case 'dying':       return '☠️'
+    case 'patrolling':  return '👮'
+    case 'arrested':    return '🚔'
+    case 'striking':    return '✊'
     case 'idle':
     default:
       return state === 'unemployed'
@@ -56,6 +61,7 @@ const COLORS = {
   business_owner: new THREE.Color(0x9B72AA), // purple
   retired: new THREE.Color(0x707080),       // grey
   criminal: new THREE.Color(0xCC3333),     // red
+  police: new THREE.Color(0x1565C0),       // dark blue (law enforcement)
   dead: new THREE.Color(0x444444),         // dark grey
   child: new THREE.Color(0x81C784),       // soft green
   // Location types
@@ -377,6 +383,7 @@ export class AgentScene {
     resource: '🌳',
     factory: '🏭',
     bank: '🏦',
+    police_station: '🚔',
   }
 
   // Workplace sub-type emojis

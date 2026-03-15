@@ -54,7 +54,9 @@ const showEvents = ref(false)
         <div class="legend__item"><span class="legend__emoji">👴</span><span>Retired (♂)</span></div>
         <div class="legend__item"><span class="legend__emoji">👵</span><span>Retired (♀)</span></div>
         <div class="legend__item"><span class="legend__emoji">🥷</span><span>Criminal</span></div>
-        <div class="legend__item"><span class="legend__emoji">👦</span><span>Child (♂)</span></div>
+        <div class="legend__item"><span class="legend__emoji">�</span><span>Police</span></div>
+        <div class="legend__item"><span class="legend__emoji">✊</span><span>On Strike</span></div>
+        <div class="legend__item"><span class="legend__emoji">�👦</span><span>Child (♂)</span></div>
         <div class="legend__item"><span class="legend__emoji">👧</span><span>Child (♀)</span></div>
       </div>
     </div>

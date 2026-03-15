@@ -69,6 +69,8 @@ const stateColor = computed(() => {
   if (s === 'unemployed') return '#E07A5F'
   if (s === 'business_owner') return '#9B72AA'
   if (s === 'retired') return '#707080'
+  if (s === 'police') return '#1565C0'
+  if (s === 'criminal') return '#CC3333'
   return '#888'
 })
 
@@ -81,6 +83,7 @@ const stateLabel = computed(() => {
   if (s === 'retired') return 'Retired'
   if (s === 'child') return 'Child'
   if (s === 'criminal') return 'Criminal'
+  if (s === 'police') return 'Police'
   if (s === 'dead') return 'Dead'
   return '—'
 })
@@ -96,6 +99,9 @@ const actionLabels: Record<string, string> = {
   stealing: 'Stealing',
   dying: 'Dying',
   hauling: 'Hauling',
+  patrolling: 'Patrolling',
+  arrested: 'Arrested',
+  striking: 'On Strike',
 }
 
 const actionLabel = computed(() => {

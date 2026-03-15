@@ -81,6 +81,20 @@ function fmtMoney(v: number | undefined): string {
       </div>
 
       <div class="metric-card">
+        <span class="metric-card__label">👮 Police</span>
+        <span class="metric-card__value" style="color: #1565C0">
+          {{ m.policeCount }}
+        </span>
+      </div>
+
+      <div class="metric-card">
+        <span class="metric-card__label">🏛️ Treasury</span>
+        <span class="metric-card__value" :style="{ color: m.governmentTreasury >= 0 ? '#81B29A' : '#E07A5F' }">
+          {{ fmtMoney(m.governmentTreasury) }}
+        </span>
+      </div>
+
+      <div class="metric-card">
         <span class="metric-card__label">Median Wealth</span>
         <span class="metric-card__value">{{ fmtMoney(m.medianWealth) }}</span>
       </div>

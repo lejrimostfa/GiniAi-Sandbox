@@ -67,6 +67,17 @@ export class SimulationEngine {
   private tickLayoffs = 0
   private tickTaxRevenue = 0
   private tickRedistribution = 0
+  private tickArrests = 0
+  private tickStrikers = 0
+
+  // --- Government treasury (persistent across ticks) ---
+  private governmentTreasury = 0
+  // Per-tick expense breakdown (reset each tick)
+  private tickGovExpPensions = 0
+  private tickGovExpInfra = 0
+  private tickGovExpBenefits = 0
+  private tickGovExpPolice = 0
+  private tickGovExpUBI = 0
 
   // --- Rolling window buffers for smooth rate computation ---
   private readonly RATE_WINDOW = 12 // 12-tick (~3 month) rolling window
@@ -110,6 +121,7 @@ export class SimulationEngine {
     this.recentBirths = []
     this.recentCrimes = []
     this.recentDiseases = []
+    this.governmentTreasury = 0
 
     // Initial job assignment
     this.assignInitialJobs()
@@ -169,6 +181,13 @@ export class SimulationEngine {
     this.tickLayoffs = 0
     this.tickTaxRevenue = 0
     this.tickRedistribution = 0
+    this.tickArrests = 0
+    this.tickStrikers = 0
+    this.tickGovExpPensions = 0
+    this.tickGovExpInfra = 0
+    this.tickGovExpBenefits = 0
+    this.tickGovExpPolice = 0
+    this.tickGovExpUBI = 0
 
     // Reset per-tick earnings and increment unemployment counters
     for (const agent of this.agents) {
@@ -945,7 +964,7 @@ export class SimulationEngine {
     // ---- ANNUAL OBLIGATORY EVENTS — override normal behavior on key ticks ----
 
     // Tax Day (Q1): only WORKERS go to government to pay taxes
-    if (this.isAnnualQuarter(ANNUAL_Q1) && (agent.state === 'employed' || agent.state === 'business_owner')) {
+    if (this.isAnnualQuarter(ANNUAL_Q1) && (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')) {
       this.sendToNearest(agent, 'government')
       agent.currentAction = 'commuting'
       return
@@ -989,6 +1008,36 @@ export class SimulationEngine {
       } else {
         this.sendToNearest(agent, 'home')
         agent.currentAction = 'resting'
+      }
+      return
+    }
+
+    // --- Police: patrol areas to find criminals ---
+    if (agent.state === 'police') {
+      agent.currentAction = 'patrolling'
+      // Patrol: wander near markets, workplaces, and homes where crime happens
+      const roll = this.rng()
+      if (roll < 0.35) {
+        this.sendToNearest(agent, 'market')
+      } else if (roll < 0.60) {
+        const workplaces = this.locations.filter((l) => l.type === 'workplace')
+        if (workplaces.length > 0) {
+          const wp = workplaces[Math.floor(this.rng() * workplaces.length)]
+          agent.target = vec2(
+            wp.position.x + (this.rng() - 0.5) * 8,
+            wp.position.y + (this.rng() - 0.5) * 8,
+          )
+        }
+      } else if (roll < 0.80) {
+        // Patrol residential areas
+        const homes = this.locations.filter((l) => l.type === 'home')
+        if (homes.length > 0) {
+          const h = homes[Math.floor(this.rng() * homes.length)]
+          agent.target = vec2(h.position.x, h.position.y)
+        }
+      } else {
+        // Return to station briefly
+        this.sendToNearest(agent, 'police_station')
       }
       return
     }
@@ -1489,7 +1538,7 @@ export class SimulationEngine {
       const unempDrain = 0.20 / tpy    // unemployed: -0.20/year additional (total -0.32/yr)
       const sickDrain = 0.12 / tpy     // sick: -0.12/year additional
 
-      if (agent.state === 'employed' || agent.state === 'business_owner') {
+      if (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police') {
         agent.satisfaction = clamp(agent.satisfaction + satBoost, 0, 1)
       } else if (agent.state === 'unemployed') {
         // Unemployment is deeply dissatisfying
@@ -1913,8 +1962,8 @@ export class SimulationEngine {
 
       // Baby conditions: at least one partner employed/business_owner, both satisfied, age 20-45, limited children
       const bothSatisfied = agent.satisfaction > 0.55 && partner.satisfaction > 0.55
-      const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner')
-        || (partner.state === 'employed' || partner.state === 'business_owner')
+      const atLeastOneEmployed = (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
+        || (partner.state === 'employed' || partner.state === 'business_owner' || partner.state === 'police')
       const fertileAge = agent.age >= 20 && agent.age <= 45 && partner.age >= 20 && partner.age <= 45
       const notTooManyKids = agent.children < 4
 
@@ -2098,7 +2147,7 @@ export class SimulationEngine {
       if (this.tick % this.params.ticksPerYear === 0) {
         let score = 0.3 // base
         // Employment bonus
-        if (agent.state === 'employed' || agent.state === 'business_owner') score += 0.25
+        if (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police') score += 0.25
         // Wealth bonus (scaled)
         score += clamp(agent.wealth / 500, 0, 0.2)
         // Income bonus
@@ -2321,10 +2370,19 @@ export class SimulationEngine {
         const dist = vec2Distance(a.position, b.position)
         if (dist > INTERACTION_RADIUS) continue
 
+        // --- POLICE ARREST: police near criminal → arrest ---
+        if (a.state === 'police' && b.state === 'criminal' && dist < CRIME_PROXIMITY_RADIUS) {
+          this.arrestCriminal(a, b)
+          continue
+        } else if (b.state === 'police' && a.state === 'criminal' && dist < CRIME_PROXIMITY_RADIUS) {
+          this.arrestCriminal(b, a)
+          continue
+        }
+
         // --- CRIME: criminal near non-criminal → robbery ---
-        if (a.state === 'criminal' && b.state !== 'criminal' && dist < CRIME_PROXIMITY_RADIUS) {
+        if (a.state === 'criminal' && b.state !== 'criminal' && b.state !== 'police' && dist < CRIME_PROXIMITY_RADIUS) {
           this.attemptRobbery(a, b)
-        } else if (b.state === 'criminal' && a.state !== 'criminal' && dist < CRIME_PROXIMITY_RADIUS) {
+        } else if (b.state === 'criminal' && a.state !== 'criminal' && a.state !== 'police' && dist < CRIME_PROXIMITY_RADIUS) {
           this.attemptRobbery(b, a)
         }
 
@@ -2483,9 +2541,39 @@ export class SimulationEngine {
     }
   }
 
+  // --- Helper: police arrests a criminal ---
+  private arrestCriminal(police: Agent, criminal: Agent): void {
+    if (this.rng() > 0.6) return // 60% arrest success rate per encounter
+
+    this.tickArrests++
+    // Criminal becomes unemployed (rehabilitation through arrest)
+    criminal.state = 'unemployed'
+    criminal.ticksAsCriminal = 0
+    criminal.ticksUnemployed = 0
+    criminal.currentAction = 'arrested'
+    criminal.satisfaction = clamp(criminal.satisfaction + 0.05, 0, 1) // slight hope
+    // Confiscate stolen wealth (partial)
+    const confiscated = Math.min(criminal.wealth * 0.3, 50)
+    criminal.wealth -= confiscated
+    this.governmentTreasury += confiscated // goes back to treasury
+
+    criminal.lifeEvents.push({
+      tick: this.tick, type: 'rehabilitated',
+      description: 'Arrested by police — returned to civilian life',
+    })
+    police.lifeEvents.push({
+      tick: this.tick, type: 'arrested_criminal',
+      description: `Arrested a criminal (confiscated $${Math.round(confiscated)})`,
+    })
+
+    // Send criminal home
+    this.sendToNearest(criminal, 'home')
+    criminal.stayTicksRemaining = 4 // detained at home for a few ticks
+  }
+
   // --- Helper: can this agent get married? ---
   private canMarry(agent: Agent): boolean {
-    return (agent.state === 'employed' || agent.state === 'business_owner')
+    return (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police')
       && agent.partnerId === null
       && agent.satisfaction >= SimulationEngine.MARRIAGE_SAT_THRESHOLD
       && agent.age >= 20
@@ -2493,8 +2581,8 @@ export class SimulationEngine {
   }
 
   // ============================================================
-  // Government — tax, fund pensions, infrastructure, UBI
-  // Budget: taxPool → pensions → infrastructure → remaining as UBI
+  // Government — tax, fund pensions, police, infrastructure, UBI
+  // Budget flows through persistent governmentTreasury
   // ============================================================
   private processGovernment(): void {
     if (this.params.redistributionLevel <= 0) return
@@ -2512,43 +2600,178 @@ export class SimulationEngine {
       }
     }
     this.tickTaxRevenue += taxPool
+    this.governmentTreasury += taxPool
 
     // --- 1. Fund pensions (retired agents get pension from tax pool) ---
     const retirees = living.filter((a) => a.state === 'retired')
-    const pensionPerRetiree = 12 // base pension per tick
+    const pensionPerRetiree = 12
     const totalPensionCost = retirees.length * pensionPerRetiree
-    const pensionFunded = Math.min(totalPensionCost, taxPool * 0.5) // max 50% of tax for pensions
+    const pensionFunded = Math.min(totalPensionCost, this.governmentTreasury * 0.4)
     const actualPension = retirees.length > 0 ? pensionFunded / retirees.length : 0
     for (const retiree of retirees) {
       retiree.wealth += actualPension
     }
     this.tickRedistribution += pensionFunded
-    taxPool -= pensionFunded
+    this.governmentTreasury -= pensionFunded
+    this.tickGovExpPensions = pensionFunded
 
-    // --- 2. Infrastructure maintenance (scales with location count) ---
-    const infraCost = this.locations.length * 0.5 // $0.50 per location per tick
-    taxPool -= Math.min(infraCost, taxPool * 0.2)  // max 20% of remaining for infra
+    // --- 2. Infrastructure maintenance ---
+    const infraCost = this.locations.length * 0.5
+    const infraSpent = Math.min(infraCost, Math.max(0, this.governmentTreasury) * 0.15)
+    this.governmentTreasury -= infraSpent
+    this.tickGovExpInfra = infraSpent
 
-    // --- 3. Unemployment benefits (from tax pool) ---
+    // --- 3. Unemployment benefits ---
     const unemployed = living.filter((a) => a.state === 'unemployed')
     const benefitPerUnemployed = 5
     const totalBenefitCost = unemployed.length * benefitPerUnemployed
-    const benefitFunded = Math.min(totalBenefitCost, taxPool * 0.3) // max 30% of remaining
+    const benefitFunded = Math.min(totalBenefitCost, Math.max(0, this.governmentTreasury) * 0.25)
     const actualBenefit = unemployed.length > 0 ? benefitFunded / unemployed.length : 0
     for (const u of unemployed) {
       u.wealth += actualBenefit
     }
     this.tickRedistribution += benefitFunded
-    taxPool -= benefitFunded
+    this.governmentTreasury -= benefitFunded
+    this.tickGovExpBenefits = benefitFunded
 
-    // --- 4. Remaining surplus → UBI (only if enableUBI is on) ---
-    if (taxPool > 0 && this.params.enableUBI) {
-      const ubi = taxPool / living.length
+    // --- 4. Police salaries (government-funded employment) ---
+    const policeAgents = living.filter((a) => a.state === 'police')
+    const policeSalary = 40 // per police agent per tick
+    const totalPoliceCost = policeAgents.length * policeSalary
+    const policeFunded = Math.min(totalPoliceCost, Math.max(0, this.governmentTreasury) * 0.3)
+    const actualPolicePay = policeAgents.length > 0 ? policeFunded / policeAgents.length : 0
+    for (const p of policeAgents) {
+      p.wealth += actualPolicePay
+      p.tickEarnings += actualPolicePay
+      p.income = policeSalary
+    }
+    this.governmentTreasury -= policeFunded
+    this.tickGovExpPolice = policeFunded
+
+    // --- 5. Dynamic police hiring/firing based on crime rate & dissatisfaction ---
+    this.processPoliceHiring(living)
+
+    // --- 6. Strikes: dissatisfied workers temporarily stop working ---
+    this.processStrikes(living)
+
+    // --- 7. Remaining surplus → UBI (only if enableUBI is on) ---
+    if (this.governmentTreasury > 0 && this.params.enableUBI) {
+      const ubiPool = this.governmentTreasury * 0.1 // spend 10% of treasury on UBI
+      const ubi = ubiPool / living.length
       for (const agent of living) {
         agent.wealth += ubi
       }
-      this.tickRedistribution += taxPool
+      this.tickRedistribution += ubiPool
+      this.governmentTreasury -= ubiPool
+      this.tickGovExpUBI = ubiPool
     }
+  }
+
+  // --- Police hiring: government recruits police based on crime level & social unrest ---
+  private processPoliceHiring(living: Agent[]): void {
+    const criminals = living.filter((a) => a.state === 'criminal').length
+    const police = living.filter((a) => a.state === 'police').length
+    const N = living.length
+    if (N === 0) return
+
+    // Target police ratio: scales with crime rate + dissatisfaction
+    const dissatisfied = living.filter(a =>
+      a.state !== 'child' && a.state !== 'dead' && a.satisfaction < 0.3
+    ).length
+    const dissatisfactionRate = dissatisfied / N
+
+    // Base: 1 police per 50 agents; increase with crime & dissatisfaction
+    const basePolice = Math.ceil(N / 50)
+    const crimeBonus = Math.ceil(criminals * 1.5) // 1.5 police per criminal
+    const unrestBonus = dissatisfactionRate > 0.4 ? Math.ceil(N * 0.03) : 0 // +3% if unrest
+    const targetPolice = basePolice + crimeBonus + unrestBonus
+
+    // Hire: recruit from unemployed
+    if (police < targetPolice) {
+      const toHire = Math.min(targetPolice - police, 2) // max 2 hires per tick
+      const candidates = living.filter(a =>
+        a.state === 'unemployed' && a.age >= 20 && a.age <= 50
+      )
+      for (let i = 0; i < toHire && i < candidates.length; i++) {
+        const recruit = candidates[i]
+        recruit.state = 'police'
+        recruit.income = 40
+        recruit.ticksUnemployed = 0
+        recruit.currentAction = 'patrolling'
+        recruit.workplaceId = null // police don't have a workplace — paid by government
+        recruit.lifeEvents.push({
+          tick: this.tick, type: 'joined_police',
+          description: 'Recruited into police force by government',
+        })
+        // Send to nearest police station
+        this.sendToNearest(recruit, 'police_station')
+      }
+    }
+
+    // Fire: if police force too large relative to need + treasury too low
+    if (police > targetPolice + 2 && this.governmentTreasury < 0) {
+      const toFire = Math.min(police - targetPolice, 1)
+      const policeList = living.filter(a => a.state === 'police')
+      for (let i = 0; i < toFire && i < policeList.length; i++) {
+        const officer = policeList[i]
+        officer.state = 'unemployed'
+        officer.income = 0
+        officer.ticksUnemployed = 0
+        officer.currentAction = 'idle'
+        officer.lifeEvents.push({
+          tick: this.tick, type: 'fired',
+          description: 'Laid off from police force (budget cuts)',
+        })
+      }
+    }
+
+    // Ensure at least 1 police station exists
+    const stations = this.locations.filter(l => l.type === 'police_station')
+    if (stations.length === 0) {
+      const gov = this.locations.find(l => l.type === 'government')
+      const pos = gov ? { x: gov.position.x + 8, y: gov.position.y + 3 } : { x: 0, y: 0 }
+      this.locations.push({
+        id: `police_station_${this.tick}`,
+        type: 'police_station',
+        position: pos,
+        radius: 2.5,
+        jobSlots: 0, filledSlots: 0, automatedSlots: 0, aiDisplacedSlots: 0, wage: 0,
+      })
+    }
+  }
+
+  // --- Strikes: widespread dissatisfaction causes workers to stop working ---
+  private processStrikes(living: Agent[]): void {
+    const adults = living.filter(a =>
+      a.state !== 'child' && a.state !== 'dead' && a.state !== 'retired'
+    )
+    if (adults.length === 0) return
+
+    const dissatisfied = adults.filter(a => a.satisfaction < 0.25).length
+    const dissatisfactionRate = dissatisfied / adults.length
+
+    // Strikes trigger when >35% of working-age adults are deeply dissatisfied
+    if (dissatisfactionRate < 0.35) return
+
+    // Strike probability scales with dissatisfaction beyond threshold
+    const strikeProbability = Math.min(0.3, (dissatisfactionRate - 0.35) * 2)
+
+    const employed = living.filter(a => a.state === 'employed')
+    let strikers = 0
+    for (const worker of employed) {
+      if (worker.satisfaction < 0.30 && this.rng() < strikeProbability) {
+        // Worker goes on strike this tick: no work, no earnings
+        worker.currentAction = 'striking'
+        worker.stayTicksRemaining = 0 // leave workplace
+        this.sendToNearest(worker, 'government') // protest at government
+        worker.lifeEvents.push({
+          tick: this.tick, type: 'went_on_strike',
+          description: `Went on strike (satisfaction: ${(worker.satisfaction * 100).toFixed(0)}%)`,
+        })
+        strikers++
+      }
+    }
+    this.tickStrikers = strikers
   }
 
   // ============================================================
@@ -2637,6 +2860,7 @@ export class SimulationEngine {
       retiredCount: retired,
       childCount: children,
       criminalCount: criminals,
+      policeCount: agents.filter((a) => a.state === 'police').length,
       giniCoefficient: computeGiniFast(wealths),
       medianWealth: median(rawWealths),
       meanWealth: totalWealth / N,
@@ -2654,8 +2878,26 @@ export class SimulationEngine {
       aiFiredWorkers: this.cumulativeAiFired,
       classTransitions: 0, // TODO: track state changes per tick if needed
       meanSatisfaction: satisfactions.reduce((a, b) => a + b, 0) / N,
+      gdp: agents.reduce((s, a) => s + a.tickEarnings, 0),
+      gdpPerCapita: (() => {
+        const workingAge = agents.filter(a => a.state !== 'child' && a.state !== 'retired').length
+        const totalEarnings = agents.reduce((s, a) => s + a.tickEarnings, 0)
+        return workingAge > 0 ? totalEarnings / workingAge : 0
+      })(),
       taxRevenue: this.tickTaxRevenue,
       redistributionPaid: this.tickRedistribution,
+      governmentTreasury: this.governmentTreasury,
+      govExpPensions: this.tickGovExpPensions,
+      govExpInfra: this.tickGovExpInfra,
+      govExpBenefits: this.tickGovExpBenefits,
+      govExpPolice: this.tickGovExpPolice,
+      govExpUBI: this.tickGovExpUBI,
+      // Social unrest
+      strikeRate: (() => {
+        const workers = agents.filter(a => a.state === 'employed').length
+        return workers > 0 ? this.tickStrikers / workers : 0
+      })(),
+      arrestsThisTick: this.tickArrests,
       // Societal phenomena
       births: this.tickBirths,
       deaths: this.tickDeaths,
@@ -2698,6 +2940,7 @@ export class SimulationEngine {
       tick: 0, year: 0,
       totalPopulation: 0,
       employedCount: 0, unemployedCount: 0, businessOwnerCount: 0, retiredCount: 0, childCount: 0, criminalCount: 0,
+      policeCount: 0,
       giniCoefficient: 0, medianWealth: 0, meanWealth: 0,
       top10WealthShare: 0, bottom50WealthShare: 0,
       medianIncome: 0,
@@ -2705,7 +2948,10 @@ export class SimulationEngine {
       automationRate: 0, aiDisplacementRate: 0, totalDisplacementRate: 0,
       roboticFiredWorkers: 0, aiFiredWorkers: 0,
       classTransitions: 0, meanSatisfaction: 0,
+      gdp: 0, gdpPerCapita: 0,
       taxRevenue: 0, redistributionPaid: 0,
+      governmentTreasury: 0, govExpPensions: 0, govExpInfra: 0, govExpBenefits: 0, govExpPolice: 0, govExpUBI: 0,
+      strikeRate: 0, arrestsThisTick: 0,
       births: 0, deaths: 0, divorces: 0, marriages: 0,
       prematureDeaths: 0, diseases: 0, crimes: 0, layoffs: 0,
       fertilityRate: 0, crimeRate: 0, diseaseRate: 0,

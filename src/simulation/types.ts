@@ -36,12 +36,12 @@ export type HeatmapMode = 'none' | 'wealth' | 'poverty' | 'illness' | 'unemploym
 // ============================================================
 // Agent State
 // ============================================================
-export type AgentState = 'employed' | 'unemployed' | 'business_owner' | 'retired' | 'criminal' | 'dead' | 'child'
+export type AgentState = 'employed' | 'unemployed' | 'business_owner' | 'retired' | 'criminal' | 'dead' | 'child' | 'police'
 
 // ============================================================
 // Agent current action (for emoji display)
 // ============================================================
-export type AgentAction = 'idle' | 'working' | 'shopping' | 'job_seeking' | 'studying' | 'commuting' | 'resting' | 'stealing' | 'dying' | 'hauling'
+export type AgentAction = 'idle' | 'working' | 'shopping' | 'job_seeking' | 'studying' | 'commuting' | 'resting' | 'stealing' | 'dying' | 'hauling' | 'patrolling' | 'arrested' | 'striking'
 
 // ============================================================
 // Agent
@@ -113,7 +113,7 @@ export interface Agent {
 // ============================================================
 export interface LifeEvent {
   tick: number
-  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide'
+  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide' | 'joined_police' | 'arrested_criminal' | 'went_on_strike'
   description: string
 }
 
@@ -193,7 +193,7 @@ export const WORKPLACE_CONFIGS: Record<WorkplaceType, WorkplaceConfig> = {
 // ============================================================
 // Location (Point of Interest on the world plane)
 // ============================================================
-export type LocationType = 'home' | 'workplace' | 'market' | 'school' | 'government' | 'resource' | 'factory' | 'bank'
+export type LocationType = 'home' | 'workplace' | 'market' | 'school' | 'government' | 'resource' | 'factory' | 'bank' | 'police_station'
 
 export interface Location {
   id: string
@@ -320,6 +320,7 @@ export interface SimMetrics {
   retiredCount: number
   childCount: number
   criminalCount: number
+  policeCount: number
   // Inequality
   giniCoefficient: number
   medianWealth: number
@@ -343,9 +344,21 @@ export interface SimMetrics {
   classTransitions: number // agents who changed class this tick
   // Satisfaction
   meanSatisfaction: number
+  // Economy
+  gdp: number                   // total earnings this tick (sum of all tickEarnings)
+  gdpPerCapita: number          // gdp / working-age population
   // Government
   taxRevenue: number
   redistributionPaid: number
+  governmentTreasury: number    // cumulative government balance
+  govExpPensions: number        // this tick: pension spending
+  govExpInfra: number           // this tick: infrastructure spending
+  govExpBenefits: number        // this tick: unemployment benefits
+  govExpPolice: number          // this tick: police salary spending
+  govExpUBI: number             // this tick: UBI spending
+  // Social unrest
+  strikeRate: number            // fraction of workers on strike this tick
+  arrestsThisTick: number       // criminals arrested by police this tick
   // --- Societal phenomena (per-tick counts) ---
   births: number
   deaths: number

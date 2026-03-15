@@ -68,6 +68,12 @@ const LOCATION_INFO: Record<LocationType, { icon: string; title: string; descrip
     description: 'Agents can obtain loans based on their financial score (employment, income, wealth). Loans enable investment or survival.',
     impact: 'Facilitates access to capital. Struggling agents can borrow but risk defaulting, which worsens their situation (satisfaction, crime).',
   },
+  police_station: {
+    icon: '🚔',
+    title: 'Police Station',
+    description: 'Government-funded law enforcement. Police officers patrol the city to arrest criminals and maintain order.',
+    impact: 'Reduces crime rate by arresting criminals. Funded by government treasury — more police are hired during social unrest. Confiscated wealth returns to the treasury.',
+  },
 }
 
 const WORKPLACE_INFO: Record<WorkplaceType, { label: string; detail: string }> = {

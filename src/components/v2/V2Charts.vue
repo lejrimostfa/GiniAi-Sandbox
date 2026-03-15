@@ -21,6 +21,8 @@ const tabs = [
   { id: 'wealthDist', label: 'Distribution' },
   { id: 'ageDist', label: 'Age' },
   { id: 'automation', label: 'Automation' },
+  { id: 'gdp', label: 'GDP' },
+  { id: 'government', label: 'Government' },
   { id: 'satisfaction', label: 'Satisfaction' },
   { id: 'societal', label: 'Societal' },
   { id: 'housing', label: 'Housing' },
@@ -146,13 +148,16 @@ const ageDistData = computed<ChartData<'bar'>>(() => {
     const idx = Math.min(Math.floor(a.age / bucketSize), bucketCount - 1)
     buckets[idx]++
   }
+  // Reverse so oldest is at top, youngest at bottom (standard pyramid)
+  const revLabels = [...bucketLabels].reverse()
+  const revBuckets = [...buckets].reverse()
   return {
-    labels: bucketLabels,
+    labels: revLabels,
     datasets: [{
       label: 'Agents',
-      data: buckets,
-      backgroundColor: buckets.map((_, i) => {
-        const lo = i * bucketSize
+      data: revBuckets,
+      backgroundColor: revBuckets.map((_, i) => {
+        const lo = (bucketCount - 1 - i) * bucketSize
         if (lo < 18) return 'rgba(100, 180, 255, 0.7)'  // children — blue
         if (lo < 65) return 'rgba(129, 178, 154, 0.7)'   // working age — green
         return 'rgba(212, 165, 116, 0.7)'                  // retired — gold
@@ -208,6 +213,75 @@ const autoOpts = computed<ChartOptions<'line'>>(() => {
   const o = baseLineOptions('Jobs vs Displacement (Robotic + AI)')
   o.scales!.y = { ...o.scales!.y, min: 0,
     title: { display: true, text: 'Job Count', color: CHART_COLORS.textMuted, font: { size: 10 } } }
+  return o
+})
+
+// --- GDP chart ---
+const gdpData = computed<ChartData<'line'>>(() => ({
+  labels: labels.value,
+  datasets: [
+    { label: 'GDP (total output)',
+      data: smoothData(sim.metricsHistory.map(m => m.gdp)),
+      borderColor: '#81B29A', backgroundColor: 'rgba(129,178,154,0.15)', fill: true },
+    { label: 'GDP per Capita',
+      data: smoothData(sim.metricsHistory.map(m => m.gdpPerCapita)),
+      borderColor: '#F2CC8F', backgroundColor: 'transparent', borderDash: [4, 2] },
+    { label: 'Tax Revenue',
+      data: smoothData(sim.metricsHistory.map(m => m.taxRevenue)),
+      borderColor: '#4A90D9', backgroundColor: 'rgba(74,144,217,0.1)', fill: true, borderDash: [3, 2] },
+  ],
+}))
+const gdpOpts = computed<ChartOptions<'line'>>(() => {
+  const o = baseLineOptions('GDP & Economic Output')
+  o.scales!.y = { ...o.scales!.y, min: 0,
+    title: { display: true, text: 'Amount ($)', color: CHART_COLORS.textMuted, font: { size: 10 } } }
+  return o
+})
+
+// --- Government Treasury chart ---
+const govData = computed<ChartData<'line'>>(() => ({
+  labels: labels.value,
+  datasets: [
+    { label: 'Treasury Balance',
+      data: smoothData(sim.metricsHistory.map(m => m.governmentTreasury)),
+      borderColor: '#4A90D9', backgroundColor: 'rgba(74,144,217,0.15)', fill: true, borderWidth: 2 },
+    { label: 'Tax Revenue (income)',
+      data: smoothData(sim.metricsHistory.map(m => m.taxRevenue)),
+      borderColor: '#81B29A', backgroundColor: 'transparent', borderDash: [4, 2] },
+    { label: 'Pensions',
+      data: smoothData(sim.metricsHistory.map(m => m.govExpPensions)),
+      borderColor: '#F2CC8F', backgroundColor: 'transparent', borderDash: [3, 2] },
+    { label: 'Benefits',
+      data: smoothData(sim.metricsHistory.map(m => m.govExpBenefits)),
+      borderColor: '#E07A5F', backgroundColor: 'transparent', borderDash: [3, 2] },
+    { label: 'Police',
+      data: smoothData(sim.metricsHistory.map(m => m.govExpPolice)),
+      borderColor: '#1565C0', backgroundColor: 'transparent', borderDash: [3, 2] },
+    { label: 'Infrastructure',
+      data: smoothData(sim.metricsHistory.map(m => m.govExpInfra)),
+      borderColor: '#9B72AA', backgroundColor: 'transparent', borderDash: [3, 2] },
+    { label: 'UBI',
+      data: smoothData(sim.metricsHistory.map(m => m.govExpUBI)),
+      borderColor: '#66BB6A', backgroundColor: 'transparent', borderDash: [3, 2] },
+    { label: 'Police Count',
+      data: sim.metricsHistory.map(m => m.policeCount),
+      borderColor: '#1565C0', backgroundColor: 'rgba(21,101,192,0.1)', fill: true, yAxisID: 'y1' },
+    { label: 'Strike Rate (%)',
+      data: sim.metricsHistory.map(m => m.strikeRate * 100),
+      borderColor: '#CC3333', backgroundColor: 'rgba(204,51,51,0.1)', fill: true, yAxisID: 'y1' },
+  ],
+}))
+const govOpts = computed<ChartOptions<'line'>>(() => {
+  const o = baseLineOptions('Government Treasury & Expenses')
+  o.scales!.y = { ...o.scales!.y,
+    title: { display: true, text: 'Amount ($)', color: CHART_COLORS.textMuted, font: { size: 10 } } }
+  o.scales!.y1 = {
+    position: 'right' as const,
+    grid: { drawOnChartArea: false },
+    title: { display: true, text: 'Count / %', color: CHART_COLORS.textMuted, font: { size: 10 } },
+    ticks: { color: CHART_COLORS.textMuted },
+    min: 0,
+  }
   return o
 })
 
@@ -354,6 +428,8 @@ const scatterMetricKeys = [
   { value: 'medianIncome', label: 'Median Income' },
   { value: 'top10WealthShare', label: 'Top 10% Wealth Share' },
   { value: 'bottom50WealthShare', label: 'Bottom 50% Wealth Share' },
+  { value: 'gdp', label: 'GDP' },
+  { value: 'gdpPerCapita', label: 'GDP per Capita' },
   { value: 'effectiveTaxRate', label: 'Tax Rate' },
   { value: 'taxRevenue', label: 'Tax Revenue' },
   { value: 'redistributionPaid', label: 'Benefits Paid' },
@@ -383,6 +459,11 @@ const scatterMetricKeys = [
   { value: 'homeOwnerCount', label: 'Home Owners' },
   { value: 'mortgageCount', label: 'Mortgage Holders' },
   { value: 'renterCount', label: 'Renters' },
+  // Government
+  { value: 'governmentTreasury', label: 'Gov Treasury' },
+  { value: 'policeCount', label: 'Police Count' },
+  { value: 'strikeRate', label: 'Strike Rate' },
+  { value: 'arrestsThisTick', label: 'Arrests (per tick)' },
 ]
 
 function getMetricValue(m: Record<string, unknown>, key: string): number {
@@ -451,6 +532,8 @@ const wealthChart = ref<InstanceType<typeof Line> | null>(null)
 const wealthDistChart = ref<InstanceType<typeof Bar> | null>(null)
 const ageDistChart = ref<InstanceType<typeof Bar> | null>(null)
 const autoChart = ref<InstanceType<typeof Line> | null>(null)
+const gdpChart = ref<InstanceType<typeof Line> | null>(null)
+const govChart = ref<InstanceType<typeof Line> | null>(null)
 const satChart = ref<InstanceType<typeof Line> | null>(null)
 const societalChart = ref<InstanceType<typeof Line> | null>(null)
 const housingChart = ref<InstanceType<typeof Line> | null>(null)
@@ -459,8 +542,8 @@ const scatterChart = ref<InstanceType<typeof Scatter> | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chartRefs: Record<string, ReturnType<typeof ref<any>>> = {
   gini: giniChart, employment: empChart, wealth: wealthChart,
-  wealthDist: wealthDistChart, ageDist: ageDistChart, automation: autoChart,
-  satisfaction: satChart, societal: societalChart, housing: housingChart, scatter: scatterChart,
+  wealthDist: wealthDistChart, ageDist: ageDistChart, automation: autoChart, gdp: gdpChart,
+  government: govChart, satisfaction: satChart, societal: societalChart, housing: housingChart, scatter: scatterChart,
 }
 
 function resetZoom() {
@@ -506,6 +589,8 @@ watch(activeTab, () => {
       <div v-show="activeTab === 'wealthDist'" class="chart-wrap"><Bar ref="wealthDistChart" :data="wealthDistData" :options="wealthDistOpts" /></div>
       <div v-show="activeTab === 'ageDist'" class="chart-wrap"><Bar ref="ageDistChart" :data="ageDistData" :options="ageDistOpts" /></div>
       <div v-show="activeTab === 'automation'" class="chart-wrap"><Line ref="autoChart" :data="autoData" :options="autoOpts" /></div>
+      <div v-show="activeTab === 'gdp'" class="chart-wrap"><Line ref="gdpChart" :data="gdpData" :options="gdpOpts" /></div>
+      <div v-show="activeTab === 'government'" class="chart-wrap"><Line ref="govChart" :data="govData" :options="govOpts" /></div>
       <div v-show="activeTab === 'satisfaction'" class="chart-wrap"><Line ref="satChart" :data="satData" :options="satOpts" /></div>
       <div v-show="activeTab === 'societal'" class="chart-wrap chart-wrap--societal">
         <div class="societal-toggles">
