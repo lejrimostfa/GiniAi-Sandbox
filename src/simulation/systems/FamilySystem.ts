@@ -7,6 +7,8 @@
 import type { Agent } from '../types'
 import type { SimulationContext } from '../SimulationContext'
 import { clamp, uid } from '../utils'
+import { defaultCivicProfile } from '../civic/CivicSystem'
+import { computeFertilityModifier, transmitReligion } from '../religion/ReligionSystem'
 import {
   POOR_COUPLE_WEALTH_THRESHOLD,
 } from '../constants'
@@ -79,7 +81,9 @@ export function processFamily(ctx: SimulationContext): void {
     const kidsPenalty = agent.children * 0.12 // +12% per existing child
 
     const conceptionFailure = Math.min(0.75, agePenalty + eduPenalty + wealthPenalty + kidsPenalty - povertyBoost)
-    const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure)) * satFactor
+    // Religion fertility modifier: religiosity + community → soft push toward higher fertility
+    const religionFertMod = computeFertilityModifier(agent, partner)
+    const adjustedBirthProb = birthProbPerTick * (1 - Math.max(0, conceptionFailure)) * satFactor * (1 + religionFertMod)
     // Floor: even worst-case couple has ~5% annual chance (≈0.001/tick)
     const floorProb = 0.08 / ctx.params.ticksPerYear
     const finalBirthProb = Math.max(floorProb, adjustedBirthProb)
@@ -159,6 +163,11 @@ export function processFamily(ctx: SimulationContext): void {
         businessRevenue: 0,
         businessTicksUnprofitable: 0,
         ticksStudying: 0,
+        civicProfile: defaultCivicProfile(),
+        opinionState: null,
+        religion: (agent.religion || partner.religion)
+          ? transmitReligion(agent, partner, ctx.params.religionConfig, ctx.rng)
+          : undefined,
         trail: [],
         lifeEvents: [{
           tick: ctx.tick,

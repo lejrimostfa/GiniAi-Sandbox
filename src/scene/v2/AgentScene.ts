@@ -560,6 +560,9 @@ export class AgentScene {
       case 'familySize':
         // Family size: single=0, couple=0.3, couple+kids scales up
         return Math.min(1, ((agent.partnerId ? 1 : 0) + agent.children) / 5)
+      case 'religion':
+        // Religiosity intensity: 0 = secular/unaffiliated, 1 = highly religious
+        return agent.religion ? agent.religion.religiosity : 0
       default:
         return 0
     }

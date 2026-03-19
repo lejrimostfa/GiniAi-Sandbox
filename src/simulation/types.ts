@@ -2,6 +2,10 @@
 // Primer-style agent-based economic simulation types
 // All simulation logic operates on these types (decoupled from rendering)
 
+import type { CivicProfile, OpinionState } from './civic/types'
+import type { ReligionProfile, ReligionConfig } from './religion/types'
+import { DEFAULT_RELIGION_CONFIG } from './religion/types'
+
 // ============================================================
 // Vector2 — simple 2D position/velocity
 // ============================================================
@@ -31,7 +35,7 @@ export type Gender = 'male' | 'female'
 // ============================================================
 // Heatmap visual modes — color agents by property (blue→red)
 // ============================================================
-export type HeatmapMode = 'none' | 'wealth' | 'poverty' | 'illness' | 'unemployment' | 'satisfaction' | 'age' | 'education' | 'crime' | 'death' | 'birth' | 'familySize' | 'housing' | 'businesses' | 'automation'
+export type HeatmapMode = 'none' | 'wealth' | 'poverty' | 'illness' | 'unemployment' | 'satisfaction' | 'age' | 'education' | 'crime' | 'death' | 'birth' | 'familySize' | 'housing' | 'businesses' | 'automation' | 'religion'
 
 // ============================================================
 // Agent State
@@ -105,6 +109,11 @@ export interface Agent {
   businessTicksUnprofitable: number // consecutive ticks where revenue < debt payment
   // --- Education tracking ---
   ticksStudying: number          // ticks spent studying at university (for duration-based upskill)
+  // --- Civic layer ---
+  civicProfile: CivicProfile    // political/social profile (continuous traits [0,1])
+  opinionState: OpinionState | null  // current referendum opinion (null when no referendum)
+  // --- Religion layer ---
+  religion?: ReligionProfile    // religious affiliation + traits (optional, enabled via config)
   // --- Visual / history ---
   trail: Vec2[]           // recent positions (for trail rendering)
   lifeEvents: LifeEvent[] // log of major events
@@ -128,7 +137,7 @@ export interface StateTransition {
 // ============================================================
 export interface LifeEvent {
   tick: number
-  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide' | 'joined_police' | 'arrested_criminal' | 'went_on_strike' | 'sent_to_prison' | 'released_from_prison' | 'crime_failed' | 'recovered' | 'birth_hospital' | 'birth_no_hospital'
+  type: 'hired' | 'fired' | 'automated' | 'economic_layoff' | 'automation_savings' | 'started_business' | 'retired' | 'upskilled' | 'born' | 'bankrupt' | 'divorced' | 'married' | 'had_child' | 'premature_death' | 'disease' | 'crime_victim' | 'crime_perpetrator' | 'became_criminal' | 'rehabilitated' | 'died' | 'loan_taken' | 'loan_default' | 'had_baby' | 'evicted' | 'resource_delivered' | 'wage_earned' | 'business_loan_taken' | 'business_bankrupt' | 'severance' | 'inheritance' | 'home_bought' | 'mortgage_paid' | 'home_built' | 'depression' | 'suicide' | 'divorce_suicide' | 'joined_police' | 'arrested_criminal' | 'went_on_strike' | 'sent_to_prison' | 'released_from_prison' | 'crime_failed' | 'recovered' | 'birth_hospital' | 'birth_no_hospital' | 'voted'
   description: string
 }
 
@@ -408,6 +417,8 @@ export interface SimulationParams {
   immigrationRate: number        // 0–1 (intensity when enabled: 0 = trickle, 1 = full)
   // Toggles
   diseasesEnabled: boolean       // whether disease onset & contagion are active
+  // Religion layer
+  religionConfig: ReligionConfig  // religion shares, priors, dynamic parameters
   // Advanced behavior config (overrides defaults from BehaviorConfig)
   behaviorConfig: Partial<BehaviorConfig>
 }
@@ -427,6 +438,7 @@ export const DEFAULT_PARAMS: SimulationParams = {
   immigrationEnabled: false,       // off by default — user must enable in UI
   immigrationRate: 1.0,           // intensity when enabled
   diseasesEnabled: false,
+  religionConfig: DEFAULT_RELIGION_CONFIG,
   behaviorConfig: {},
 }
 
@@ -506,6 +518,11 @@ export interface SimMetrics {
   renterCount: number           // agents renting
   // --- Wealth distribution snapshot (sorted array for bar chart) ---
   wealthDistribution: number[]  // all agent wealths, sorted ascending
+  // --- Religion demographics ---
+  religionShares: Record<string, number>  // current population share by affiliation
+  avgReligiosity: number                  // mean religiosity across all agents
+  mixedMarriageRate: number               // fraction of couples with different affiliations
+  disaffiliationCount: number             // agents who became unaffiliated this tick
 }
 
 // ============================================================

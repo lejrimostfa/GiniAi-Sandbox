@@ -9,6 +9,7 @@ import type { Agent } from '../types'
 import { vec2Distance } from '../types'
 import type { SimulationContext } from '../SimulationContext'
 import { clamp } from '../utils'
+import { computeReligionCompatibility } from '../religion/ReligionSystem'
 import {
   INTERACTION_RADIUS,
   CRIME_PROXIMITY_RADIUS,
@@ -128,7 +129,9 @@ export function processProximityInteractions(ctx: SimulationContext): void {
         // Below $50 wealth → up to 50% reduction; above $200 → no penalty
         const maleWealthFactor = Math.min(1, Math.max(0.5, male.wealth / 200))
 
-        const marriageChance = 0.12 * femEduFactor * maleWealthFactor
+        // Religion compatibility modifier: same affiliation → bonus, mixed + high religiosity → penalty
+        const religionCompat = computeReligionCompatibility(a, b)
+        const marriageChance = 0.12 * femEduFactor * maleWealthFactor * (1 + religionCompat)
         if (ctx.rng() < marriageChance) {
           ctx.tickMarriages++
           a.partnerId = b.id

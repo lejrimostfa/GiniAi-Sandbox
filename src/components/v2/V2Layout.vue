@@ -16,12 +16,19 @@ import HeatmapControl from './HeatmapControl.vue'
 import HelpPage from './HelpPage.vue'
 import InfoBubble from './InfoBubble.vue'
 import ScientificQualification from './ScientificQualification.vue'
+import ReferendumPanel from './ReferendumPanel.vue'
+import VoteResultsPanel from './VoteResultsPanel.vue'
+import OpinionBlocPanel from './OpinionBlocPanel.vue'
+import ChatPanel from './ChatPanel.vue'
 import { useSimStore } from '../../stores/v2SimulationStore'
+import { useChatStore } from '../../stores/chatStore'
 
 const sim = useSimStore()
+const chat = useChatStore()
 const showCharts = ref(false)
 const showHelp = ref(false)
 const showQualification = ref(false)
+const showCivic = ref(false)
 </script>
 
 <template>
@@ -41,6 +48,7 @@ const showQualification = ref(false)
           · Year {{ sim.currentMetrics.year }}
           · Week {{ (sim.currentMetrics.tick % 52) + 1 }}/52
         </span>
+        <button class="topbar-help-btn" :class="{ 'topbar-help-btn--active': showCivic }" @click="showCivic = !showCivic" title="Civic Layer">🗳️</button>
         <button class="topbar-help-btn" @click="showQualification = true" title="Scientific Qualification">🔬</button>
         <button class="topbar-help-btn" @click="showHelp = true" title="Help">📖</button>
       </div>
@@ -71,11 +79,21 @@ const showQualification = ref(false)
     <!-- Info bubble (teleports to body) -->
     <InfoBubble />
 
-    <!-- Right: Metrics + Inspector -->
+    <!-- Right: Metrics + Inspector + Civic -->
     <aside class="v2-layout__right">
-      <MetricsDashboard />
+      <template v-if="showCivic">
+        <ReferendumPanel />
+        <OpinionBlocPanel />
+        <VoteResultsPanel />
+      </template>
+      <template v-else>
+        <MetricsDashboard />
+      </template>
       <AgentInspector />
     </aside>
+
+    <!-- Chat Panel: floats to the left of the right panel -->
+    <ChatPanel v-if="chat.isOpen" />
 
     <!-- Bottom: Playback -->
     <footer class="v2-layout__bottom">
@@ -173,6 +191,7 @@ const showQualification = ref(false)
     background: $bg-panel;
     display: flex;
     flex-direction: column;
+    position: relative;
   }
 
   &__bottom {
@@ -230,6 +249,10 @@ const showQualification = ref(false)
   transition: background 0.15s;
   &:hover {
     background: rgba(70, 70, 100, 0.8);
+  }
+  &--active {
+    background: rgba(91, 143, 185, 0.3);
+    border-color: rgba(91, 143, 185, 0.5);
   }
 }
 </style>

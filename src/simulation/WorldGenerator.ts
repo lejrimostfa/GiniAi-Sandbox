@@ -12,6 +12,8 @@ import {
   createRNG, generateWealthDistribution, uid, resetUidCounter, type RNG,
 } from './utils'
 import { APARTMENT_RENT_RATIO, HOUSE_RENT_RATIO } from './constants'
+import { defaultCivicProfile } from './civic/CivicSystem'
+import { assignAffiliation, initReligionProfile } from './religion/ReligionSystem'
 
 // ============================================================
 // World sizing — world radius scales with population
@@ -337,6 +339,14 @@ export function generateAgents(
       businessTicksUnprofitable: 0,
       ticksStudying: 0,
       stayTicksRemaining: 0,
+      civicProfile: defaultCivicProfile(),
+      opinionState: null,
+      religion: params.religionConfig.enabled
+        ? (() => {
+            const aff = assignAffiliation(params.religionConfig, rng)
+            return initReligionProfile(aff, params.religionConfig, rng)
+          })()
+        : undefined,
       trail: [],
       lifeEvents: [{
         tick: 0,

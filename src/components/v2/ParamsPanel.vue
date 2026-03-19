@@ -29,6 +29,8 @@ const enableUBI = ref(sim.params.enableUBI)
 const immigrationEnabled = ref(sim.params.immigrationEnabled)
 const immigrationRate = ref(sim.params.immigrationRate * 100)
 const diseasesEnabled = ref(sim.params.diseasesEnabled)
+const religionEnabled = ref(sim.params.religionConfig.enabled)
+const religionDiscrimination = ref(sim.params.religionConfig.discriminationIntensity * 100)
 const economyType = ref<EconomyType>(sim.params.economyType)
 
 const eduTotal = computed(() => Math.round(eduLow.value + eduMed.value + eduHigh.value))
@@ -83,6 +85,8 @@ watch(enableUBI, (v) => sim.updateParams({ enableUBI: v }))
 watch(immigrationEnabled, (v) => sim.updateParams({ immigrationEnabled: v }))
 watch(immigrationRate, (v) => sim.updateParams({ immigrationRate: v / 100 }))
 watch(diseasesEnabled, (v) => sim.updateParams({ diseasesEnabled: v }))
+watch(religionEnabled, (v) => sim.updateParams({ religionConfig: { ...sim.params.religionConfig, enabled: v } }))
+watch(religionDiscrimination, (v) => sim.updateParams({ religionConfig: { ...sim.params.religionConfig, discriminationIntensity: v / 100 } }))
 
 // --- Reset simulation with current params ---
 function resetSim() {
@@ -244,6 +248,25 @@ function resetSim() {
         <span>Enable Diseases</span>
       </label>
       <div class="param-hint">When disabled, agents cannot fall ill or spread contagion</div>
+    </div>
+
+    <h3 class="panel-title">Religion Layer</h3>
+
+    <div class="param-group">
+      <label class="ubi-toggle">
+        <input type="checkbox" v-model="religionEnabled" :disabled="simStarted" />
+        <span>Enable Religion</span>
+      </label>
+      <div class="param-hint">Assigns religious affiliations that influence marriage, fertility, satisfaction &amp; civic opinions</div>
+    </div>
+
+    <div class="param-group" v-if="religionEnabled">
+      <label>
+        Discrimination Intensity
+        <span class="param-value">{{ religionDiscrimination.toFixed(0) }}%</span>
+      </label>
+      <input type="range" min="0" max="100" step="5" v-model.number="religionDiscrimination" />
+      <div class="param-hint">How much minority religious groups experience satisfaction drain (0 = none, 100 = severe)</div>
     </div>
 
     <button class="reset-btn" @click="resetSim">

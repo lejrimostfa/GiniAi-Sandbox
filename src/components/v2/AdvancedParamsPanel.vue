@@ -4,10 +4,12 @@
 // Grouped by behavior category with collapsible sections
 // Updates are live — pushed to simulation engine each tick
 
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 import { useSimStore } from '../../stores/v2SimulationStore'
 import { DEFAULT_BEHAVIOR_CONFIG } from '../../simulation/types'
 import type { BehaviorConfig } from '../../simulation/types'
+import { AFFILIATIONS, AFFILIATION_EMOJI, AFFILIATION_COLORS, DEFAULT_RELIGION_CONFIG } from '../../simulation/religion/types'
+import type { ReligiousAffiliation } from '../../simulation/religion/types'
 
 const sim = useSimStore()
 
@@ -19,6 +21,7 @@ const config = reactive<BehaviorConfig>({
 
 // Track which groups are expanded
 const expanded = reactive<Record<string, boolean>>({
+  religion: false,
   crime: false,
   prison: false,
   police: false,
@@ -30,6 +33,56 @@ const expanded = reactive<Record<string, boolean>>({
   economy: false,
   disease: false,
 })
+
+// --- Religion shares (local reactive copy) ---
+const relShares = reactive<Record<ReligiousAffiliation, number>>(
+  { ...sim.params.religionConfig.shares }
+)
+
+// Normalize: when one slider moves, adjust others proportionally so sum = 1
+function onShareChange(changed: ReligiousAffiliation, newVal: number) {
+  const clamped = Math.max(0, Math.min(1, newVal))
+  relShares[changed] = clamped
+
+  // Sum of all OTHER shares
+  const others = AFFILIATIONS.filter(a => a !== changed)
+  const otherSum = others.reduce((s, a) => s + relShares[a], 0)
+  const remaining = 1 - clamped
+
+  if (otherSum > 0) {
+    // Scale others proportionally
+    const scale = remaining / otherSum
+    for (const a of others) {
+      relShares[a] = Math.max(0, relShares[a] * scale)
+    }
+  } else {
+    // All others are 0 — distribute equally
+    const each = remaining / others.length
+    for (const a of others) {
+      relShares[a] = each
+    }
+  }
+}
+
+function resetShares() {
+  Object.assign(relShares, DEFAULT_RELIGION_CONFIG.shares)
+}
+
+// Formatted percentage for display
+function sharePct(val: number): string {
+  return (val * 100).toFixed(1) + '%'
+}
+
+// Computed label for affiliation
+function affLabel(a: ReligiousAffiliation): string {
+  return AFFILIATION_EMOJI[a] + ' ' + a.charAt(0).toUpperCase() + a.slice(1)
+}
+
+// Push religion shares to sim whenever they change
+watch(relShares, () => {
+  const newConfig = { ...sim.params.religionConfig, shares: { ...relShares } }
+  sim.updateParams({ religionConfig: newConfig })
+}, { deep: true })
 
 // Slider definitions: grouped by category
 // Each slider: { key, label, min, max, step, unit? }
@@ -174,6 +227,17 @@ watch(config, () => {
 }, { deep: true })
 
 const showPanel = ref(false)
+
+// Stacked bar segments for visual display
+const barSegments = computed(() =>
+  AFFILIATIONS.map(a => ({
+    affiliation: a,
+    width: relShares[a] * 100,
+    color: AFFILIATION_COLORS[a],
+    label: affLabel(a),
+    pct: sharePct(relShares[a]),
+  }))
+)
 </script>
 
 <template>
@@ -188,6 +252,54 @@ const showPanel = ref(false)
         <button class="adv-params__reset-all" @click="resetAll" title="Reset all to defaults">
           🔄 Reset All
         </button>
+      </div>
+
+      <!-- Religion Shares -->
+      <div class="adv-group">
+        <button class="adv-group__header" @click="toggleGroup('religion')">
+          <span class="adv-group__icon">🕊️</span>
+          <span class="adv-group__title">Religion Shares</span>
+          <span class="adv-group__chevron" :class="{ open: expanded.religion }">▸</span>
+          <span
+            class="adv-group__reset"
+            role="button"
+            tabindex="0"
+            @click.stop="resetShares()"
+            @keydown.enter.stop="resetShares()"
+            title="Reset to defaults"
+          >↺</span>
+        </button>
+
+        <div v-if="expanded.religion" class="adv-group__sliders">
+          <!-- Stacked proportion bar -->
+          <div class="rel-bar">
+            <div
+              v-for="seg in barSegments"
+              :key="seg.affiliation"
+              class="rel-bar__seg"
+              :style="{ width: seg.width + '%', backgroundColor: seg.color }"
+              :title="seg.label + ': ' + seg.pct"
+            ></div>
+          </div>
+
+          <!-- Per-affiliation sliders -->
+          <div v-for="aff in AFFILIATIONS" :key="aff" class="adv-slider">
+            <div class="adv-slider__header">
+              <label class="adv-slider__label">{{ affLabel(aff) }}</label>
+              <span class="adv-slider__value">{{ sharePct(relShares[aff]) }}</span>
+            </div>
+            <input
+              type="range"
+              class="adv-slider__input"
+              :style="{ '--thumb-color': AFFILIATION_COLORS[aff] }"
+              :min="0"
+              :max="1"
+              :step="0.005"
+              :value="relShares[aff]"
+              @input="onShareChange(aff, Number(($event.target as HTMLInputElement).value))"
+            />
+          </div>
+        </div>
       </div>
 
       <div v-for="group in groups" :key="group.id" class="adv-group">
@@ -436,6 +548,23 @@ const showPanel = ref(false)
       border: none;
       cursor: pointer;
     }
+  }
+}
+
+// --- Religion proportion bar ---
+.rel-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: $space-sm;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+
+  &__seg {
+    min-width: 1px;
+    transition: width 0.15s ease;
+    opacity: 0.85;
+    &:hover { opacity: 1; }
   }
 }
 </style>

@@ -6,10 +6,12 @@
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSimStore } from '../../stores/v2SimulationStore'
+import { useChatStore } from '../../stores/chatStore'
 import type { Agent } from '../../simulation/types'
 import eventBus from '../../events/eventBus'
 
 const sim = useSimStore()
+const chatStore = useChatStore()
 const selectedId = ref<string | null>(null)
 const hoveredId = ref<string | null>(null)
 
@@ -148,6 +150,7 @@ const wealthMax = computed(() => {
 
 function deselect() {
   selectedId.value = null
+  hoveredId.value = null
   eventBus.emit('cell:deselected')
 }
 </script>
@@ -166,6 +169,9 @@ function deselect() {
     <template v-else>
       <div class="inspector__header">
         <span class="inspector__id">{{ displayAgent.id }}</span>
+        <button class="inspector__chat-btn" @click="chatStore.openAgentChat(displayAgent.id)" title="Chat with this agent">
+          💬
+        </button>
         <button v-if="isSelected" class="inspector__deselect" @click="deselect" title="Deselect">
           &#10005;
         </button>
@@ -276,6 +282,122 @@ function deselect() {
         </div>
       </div>
 
+      <!-- Religion Profile -->
+      <div class="inspector__civic" v-if="displayAgent.religion">
+        <span class="inspector__civic-label">Religion Profile</span>
+        <div class="civic-grid">
+          <div class="civic-trait">
+            <span class="civic-trait__name">Affiliation</span>
+            <span class="civic-trait__val" style="text-transform: capitalize; font-weight: 600;">{{ displayAgent.religion.affiliation }}</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Religiosity</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--purple" :style="{ width: (displayAgent.religion.religiosity * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.religion.religiosity * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Practice</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--blue" :style="{ width: (displayAgent.religion.practiceLevel * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.religion.practiceLevel * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Community</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--green" :style="{ width: (displayAgent.religion.communityEmbeddedness * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.religion.communityEmbeddedness * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Transmission</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--teal" :style="{ width: (displayAgent.religion.religiousTransmissionStrength * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.religion.religiousTransmissionStrength * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Discrimination</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--red" :style="{ width: (displayAgent.religion.discriminationExposure * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.religion.discriminationExposure * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Civic Profile -->
+      <div class="inspector__civic" v-if="displayAgent.civicProfile">
+        <span class="inspector__civic-label">Civic Profile</span>
+        <div class="civic-grid">
+          <div class="civic-trait">
+            <span class="civic-trait__name">Econ. Insecurity</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--red" :style="{ width: (displayAgent.civicProfile.economicInsecurity * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.civicProfile.economicInsecurity * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Inst. Trust</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--blue" :style="{ width: (displayAgent.civicProfile.institutionalTrust * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.civicProfile.institutionalTrust * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Auto. Shock</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--orange" :style="{ width: (displayAgent.civicProfile.automationShock * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.civicProfile.automationShock * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Auth. Tendency</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--purple" :style="{ width: (displayAgent.civicProfile.authoritarianTendency * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.civicProfile.authoritarianTendency * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Conformity</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--teal" :style="{ width: (displayAgent.civicProfile.conformity * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.civicProfile.conformity * 100).toFixed(0) }}%</span>
+          </div>
+          <div class="civic-trait">
+            <span class="civic-trait__name">Pol. Attention</span>
+            <div class="civic-trait__bar">
+              <div class="civic-trait__fill civic-trait__fill--green" :style="{ width: (displayAgent.civicProfile.politicalAttention * 100) + '%' }"></div>
+            </div>
+            <span class="civic-trait__val">{{ (displayAgent.civicProfile.politicalAttention * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+        <!-- Opinion state (if referendum active) -->
+        <div v-if="displayAgent.opinionState" class="civic-opinion">
+          <div class="civic-opinion__row">
+            <span>Opinion:</span>
+            <strong :style="{ color: displayAgent.opinionState.label === 'YES' ? '#66bb6a' : displayAgent.opinionState.label === 'NO' ? '#ef5350' : '#ffa726' }">
+              {{ displayAgent.opinionState.label }}
+            </strong>
+          </div>
+          <div class="civic-opinion__row">
+            <span>Score:</span>
+            <span>{{ displayAgent.opinionState.score.toFixed(2) }}</span>
+          </div>
+          <div class="civic-opinion__row">
+            <span>Conviction:</span>
+            <span>{{ (displayAgent.opinionState.conviction * 100).toFixed(0) }}%</span>
+          </div>
+          <div v-if="displayAgent.opinionState.vote" class="civic-opinion__row">
+            <span>Vote:</span>
+            <strong>{{ displayAgent.opinionState.vote }}</strong>
+          </div>
+        </div>
+      </div>
+
       <!-- Life events -->
       <div class="inspector__events">
         <span class="inspector__events-label">Life Events</span>
@@ -339,6 +461,17 @@ function deselect() {
     font-family: monospace;
     font-size: $font-size-xs;
     color: $text-muted;
+  }
+
+  &__chat-btn {
+    background: rgba(91, 143, 185, 0.15);
+    border: 1px solid rgba(91, 143, 185, 0.3);
+    color: $text-secondary;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    &:hover { background: rgba(91, 143, 185, 0.3); color: $text-primary; }
   }
 
   &__deselect {
@@ -447,5 +580,80 @@ function deselect() {
 
 .event-desc {
   color: $text-secondary;
+}
+
+// --- Civic Profile styles ---
+.inspector__civic {
+  margin-bottom: $space-md;
+
+  &-label {
+    font-size: 10px;
+    color: $text-muted;
+    display: block;
+    margin-bottom: 4px;
+  }
+}
+
+.civic-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.civic-trait {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  &__name {
+    font-size: 9px;
+    color: $text-muted;
+    min-width: 80px;
+    text-align: right;
+  }
+
+  &__bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  &__fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+
+    &--red    { background: #ef5350; }
+    &--blue   { background: #42a5f5; }
+    &--orange { background: #ffa726; }
+    &--purple { background: #ab47bc; }
+    &--teal   { background: #26a69a; }
+    &--green  { background: #66bb6a; }
+  }
+
+  &__val {
+    font-size: 9px;
+    font-family: monospace;
+    color: $text-secondary;
+    min-width: 28px;
+    text-align: right;
+  }
+}
+
+.civic-opinion {
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+
+  &__row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: $text-secondary;
+    padding: 1px 0;
+  }
 }
 </style>

@@ -38,6 +38,13 @@ export function processEconomy(ctx: SimulationContext): void {
     const unempDrain = 0.20 / tpy    // unemployed: -0.20/year additional (total -0.32/yr)
     const sickDrain = 0.12 / tpy     // sick: -0.12/year additional
 
+    // Religion discrimination stress: minority religious groups experience soft satisfaction drain
+    // Proportional to discriminationExposure (0-1) and global intensity setting
+    if (agent.religion && ctx.params.religionConfig.enabled) {
+      const discStress = agent.religion.discriminationExposure * ctx.params.religionConfig.discriminationIntensity * 0.08 / tpy
+      agent.satisfaction = clamp(agent.satisfaction - discStress, 0, 1)
+    }
+
     if (agent.state === 'employed' || agent.state === 'business_owner' || agent.state === 'police') {
       agent.satisfaction = clamp(agent.satisfaction + satBoost, 0, 1)
     } else if (agent.state === 'unemployed') {

@@ -15,6 +15,7 @@ import {
   createRNG, computeGiniFast, clamp, median, uid, type RNG,
 } from './utils'
 import { generateWorld } from './WorldGenerator'
+import { defaultCivicProfile, initCivicProfile, updateCivicProfileFromEvent } from './civic/CivicSystem'
 import type { SimulationContext } from './SimulationContext'
 import { processGovernment } from './systems/GovernmentSystem'
 import { processLoans as loanProcessLoans } from './systems/LoanSystem'
@@ -24,6 +25,7 @@ import { processFamily as familyProcessFamily } from './systems/FamilySystem'
 import { processCausalPhenomena as causalProcess } from './systems/CausalPhenomenaSystem'
 import { processProximityInteractions as proximityProcess } from './systems/ProximitySystem'
 import { runAutomation as autoRunAutomation, processLayoffs as autoProcessLayoffs, processJobMarket as autoProcessJobMarket } from './systems/AutomationSystem'
+import { updateDiscriminationExposure, processReligionEvolution, assignAffiliation, initReligionProfile } from './religion/ReligionSystem'
 import {
   IMMIGRATION_BASE_RATE, EMIGRATION_BASE_RATE,
   EMIGRATION_LOW_SAT_THRESHOLD, EMIGRATION_UNEMPLOYED_BOOST,
@@ -146,6 +148,17 @@ export class SimulationEngine {
 
     // Initial job assignment
     this.assignInitialJobs()
+
+    // Initialize civic profiles from material state (after jobs are assigned)
+    const avgW = this.agents.reduce((s, a) => s + a.wealth, 0) / (this.agents.length || 1)
+    for (const agent of this.agents) {
+      agent.civicProfile = initCivicProfile(agent, avgW, this.rng)
+    }
+
+    // Initialize religion discrimination exposure based on actual population shares
+    if (this.params.religionConfig.enabled) {
+      updateDiscriminationExposure(this.agents, this.params.religionConfig, this.rng)
+    }
     
     // Compute initial metrics
     this.metrics = this.computeMetrics()
@@ -303,9 +316,12 @@ export class SimulationEngine {
     this.tickGovExpUBI = 0
 
     // Reset per-tick earnings and increment unemployment counters
+    // Snapshot life event counts for civic profile update hook
+    const lifeEventCounts = new Map<string, number>()
     for (const agent of this.agents) {
       agent.tickEarnings = 0
       if (agent.state === 'unemployed') agent.ticksUnemployed++
+      lifeEventCounts.set(agent.id, agent.lifeEvents.length)
     }
 
     // 0. Remove dead agents that have persisted long enough (☠️ cleanup)
@@ -325,6 +341,8 @@ export class SimulationEngine {
     // Annual processes (once per year)
     if (this.tick % this.params.ticksPerYear === 0) {
       housingProcessHousing(ctx)
+      // Religion evolution: disaffiliation, conversion, religiosity drift
+      processReligionEvolution(ctx)
     }
 
     // 2b. Economic layoffs (runs every tick — owners fire workers to cut costs)
@@ -377,6 +395,17 @@ export class SimulationEngine {
 
     // Sync all counters back to engine from the shared context
     this.syncFromContext(ctx)
+
+    // 9b. Civic profile reactive updates — process new life events from this tick
+    for (const agent of this.agents) {
+      if (agent.state === 'dead') continue
+      const prevCount = lifeEventCounts.get(agent.id) ?? 0
+      if (agent.lifeEvents.length > prevCount) {
+        for (let i = prevCount; i < agent.lifeEvents.length; i++) {
+          updateCivicProfileFromEvent(agent.civicProfile, agent.lifeEvents[i].type)
+        }
+      }
+    }
 
     // 10. Update wealth history & trails
     this.updateHistory()
@@ -881,6 +910,14 @@ export class SimulationEngine {
         businessTicksUnprofitable: 0,
         ticksStudying: 0,
         stayTicksRemaining: 0,
+        civicProfile: defaultCivicProfile(),
+        opinionState: null,
+        religion: this.params.religionConfig.enabled
+          ? (() => {
+              const aff = assignAffiliation(this.params.religionConfig, this.rng)
+              return initReligionProfile(aff, this.params.religionConfig, this.rng)
+            })()
+          : undefined,
         trail: [],
         lifeEvents: [{
           tick: this.tick,
@@ -2083,6 +2120,29 @@ export class SimulationEngine {
       mortgageCount: agents.filter(a => a.homeDebt > 0).length,
       renterCount: agents.filter(a => !a.homeOwned && a.homeDebt <= 0).length,
       wealthDistribution: sortedWealth,
+      // Religion demographics
+      religionShares: (() => {
+        const shares: Record<string, number> = { christian: 0, muslim: 0, unaffiliated: 0, hindu: 0, buddhist: 0 }
+        const withRel = agents.filter(a => a.religion)
+        const total = withRel.length || 1
+        for (const a of withRel) shares[a.religion!.affiliation] = (shares[a.religion!.affiliation] || 0) + 1
+        for (const k of Object.keys(shares)) shares[k] /= total
+        return shares
+      })(),
+      avgReligiosity: (() => {
+        const withRel = agents.filter(a => a.religion)
+        return withRel.length > 0 ? withRel.reduce((s, a) => s + a.religion!.religiosity, 0) / withRel.length : 0
+      })(),
+      mixedMarriageRate: (() => {
+        const couples = agents.filter(a => a.partnerId && a.id < a.partnerId && a.religion)
+        if (couples.length === 0) return 0
+        const mixed = couples.filter(a => {
+          const p = agents.find(b => b.id === a.partnerId)
+          return p?.religion && a.religion!.affiliation !== p.religion.affiliation
+        })
+        return mixed.length / couples.length
+      })(),
+      disaffiliationCount: 0, // tracked externally if needed
     }
   }
 
@@ -2124,6 +2184,8 @@ export class SimulationEngine {
       effectiveTaxRate: 0, avgEducationLevel: 0.5,
       homeOwnerCount: 0, mortgageCount: 0, renterCount: 0,
       wealthDistribution: [],
+      religionShares: { christian: 0, muslim: 0, unaffiliated: 0, hindu: 0, buddhist: 0 },
+      avgReligiosity: 0, mixedMarriageRate: 0, disaffiliationCount: 0,
     }
   }
 

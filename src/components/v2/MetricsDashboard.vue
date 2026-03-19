@@ -157,6 +157,22 @@ function fmtMoney(v: number | undefined): string {
         <span class="metric-card__label">Satisfaction</span>
         <span class="metric-card__value">{{ fmtPct(m.meanSatisfaction) }}</span>
       </div>
+
+      <!-- Religion Demographics -->
+      <template v-if="m.religionShares && Object.values(m.religionShares).some(v => v > 0)">
+        <div class="metric-card" style="margin-top: 8px; border-top: 1px solid rgba(100,100,140,0.15);">
+          <span class="metric-card__label" style="font-weight: 600;">Religion</span>
+          <span class="metric-card__value" style="font-size: 10px; color: #9B72AA;">Avg Rel. {{ fmtPct(m.avgReligiosity) }}</span>
+        </div>
+        <div class="metric-card" v-for="(share, aff) in m.religionShares" :key="aff">
+          <span class="metric-card__label" style="text-transform: capitalize;">{{ aff }}</span>
+          <span class="metric-card__value">{{ fmtPct(share) }}</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-card__label">Mixed Marriages</span>
+          <span class="metric-card__value">{{ fmtPct(m.mixedMarriageRate) }}</span>
+        </div>
+      </template>
     </template>
   </div>
 </template>
